@@ -48,7 +48,7 @@ Set-Content -LiteralPath (Join-Path $fixture 'global.json') -Value '{"test":{"ru
 $configPath=Join-Path $fixture 'amith.build.psd1'
 Set-Content -LiteralPath $configPath -Value '@{ Solution = ''Fixture.sln''; Runtimes = @(''win-x64'',''linux-x64''); Exclude = @(''samples/**''); Defaults = @{ ArchiveFormats = @(''zip'') }; Overrides = @(@{Match=''src/Lib/*'';Pack=$true}) }'
 $originalGhToken=$env:GH_TOKEN; $env:GH_TOKEN='not-a-real-test-token'
-$state = @{DownloadMode='Empty';SeedPackId='Amith.Client';FailVpkChannel='';PartialVpk=$false;ReflectReleases=$false;Remote=@{tag_name='v1.2.3';draft=$true;assets=@()};AssetId=0;Root=$fixture;Calls=[Collections.Generic.List[object]]::new();FailBuild=$false;FailPush=$false;FailUpload=$false}
+$state = @{DownloadMode='Empty';SeedPackId='Amith.Client';FailVpkChannel='';PartialVpk=$false;ReflectReleases=$false;Remote=@{tag_name='v1.2.3';draft=$true;assets=@()};AssetId=0;Root=$fixture;Calls=[Collections.Generic.List[object]]::new();FailTest=$false;FailBuild=$false;FailPush=$false;FailUpload=$false}
 $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock }
 & $module {
     param($State)
@@ -125,7 +125,7 @@ $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock
             '--version' { return '10.0.401' }
             tool { $dir=$Arguments[([array]::IndexOf($Arguments,'--tool-path')+1)];[void][IO.Directory]::CreateDirectory($dir);Set-Content -LiteralPath (Join-Path $dir $(if($IsWindows){'vpk.exe'}else{'vpk'})) -Value 'fake tool';return }
             build { if($script:TestState.FailBuild){throw 'simulated build failure'};return }
-            restore { return }; test { return }
+            restore { return }; test { if($script:TestState.FailTest){throw 'simulated test failure'};return }
             nuget { if($script:TestState.FailPush){throw 'simulated feed failure'};return }
             pack {
                 $dir=$Arguments[([array]::IndexOf($Arguments,'--output')+1)]
@@ -466,6 +466,7 @@ try {
     . (Join-Path $PSScriptRoot 'VelopackChecks.ps1')
     . (Join-Path $PSScriptRoot 'PackagingChecks.ps1')
     . (Join-Path $PSScriptRoot 'ConfigDiscoveryChecks.ps1')
+    . (Join-Path $PSScriptRoot 'TestPolicyChecks.ps1')
     Check 'rebuilding invalidates previous artifact and release gates' {
         $p=Invoke-AmithBuildStage $script:built.PlanPath Build;Assert-Equal 0 $p.Artifacts.Count;Assert-True (-not $p.Stages.Contains('Pack'))
     }
@@ -506,7 +507,7 @@ if ($Integration) {
         Set-Content -LiteralPath (Join-Path $root 'Desktop/Desktop.csproj') -Value '<Project Sdk="Microsoft.NET.Sdk"><PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><UseWPF>true</UseWPF><OutputType>WinExe</OutputType></PropertyGroup></Project>'
         Set-Content -LiteralPath (Join-Path $root 'Desktop/Program.cs') -Value 'internal static class Entry { [System.STAThread] public static void Main() { new System.Windows.Application().Run(); } }'
         $config=Join-Path $root 'amith.build.psd1';Set-Content -LiteralPath $config -Value '@{Discover=$false;Runtimes=@(''win-x64'',''linux-x64'');Projects=@(@{Path=''Lib/Lib.csproj'';Pack=$true},@{Path=''App/App.csproj''},@{Path=''Api/Api.csproj''},@{Path=''Desktop/Desktop.csproj'';SelfContained=$false;SingleFile=$false;SelfExtract=$false})}'
-        $p=Invoke-AmithBuild -ConfigPath $config -Version '0.0.0-integration' -PackOnlyProjects Lib -PlanPath (Join-Path $testRoot 'integration.json')
+        $p=Invoke-AmithBuild -ConfigPath $config -Version '0.0.0-integration' -NoTests -PackOnlyProjects Lib -PlanPath (Join-Path $testRoot 'integration.json')
         Assert-Equal @('win-x64','linux-x64','win-x64','linux-x64','win-x64') @($p.Artifacts|Where-Object Kind -eq PublishDirectory|ForEach-Object Runtime)
         $api=@($p.Projects|Where-Object Name -eq Api)[0]
         Assert-Equal Web $api.Kind; Assert-True $api.SelfContained; Assert-True $api.SingleFile

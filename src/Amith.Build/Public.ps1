@@ -8,6 +8,7 @@ function Invoke-AmithBuildStage {
     if ($Stage -in @('Restore', 'Build')) {
         # A rebuild invalidates prior artifact gates. Files are retained, but are
         # no longer eligible for release through this manifest.
+        [void]$plan.Remove('TestResults')
         $plan.Artifacts = @()
         [void]$plan.Remove('VelopackPackages')
         [void]$plan.Remove('PackageInputs')
@@ -15,6 +16,7 @@ function Invoke-AmithBuildStage {
         foreach ($dependent in @('Test','Pack','Publish','Archive','Installer','Retain','Release')) { [void]$plan.Stages.Remove($dependent) }
         if ($Stage -eq 'Restore') { [void]$plan.Stages.Remove('Build') }
     }
+    if ($Stage -eq 'Test') { [void]$plan.Stages.Remove('Release') }
     if ($Stage -in @('Pack','Publish','Archive','Installer')) {
         [void]$plan.Remove('RetainedRoot')
         [void]$plan.Stages.Remove('Retain')
@@ -57,6 +59,7 @@ function Invoke-AmithBuild {
           [switch] $SelfContained, [switch] $SingleFile, [switch] $StandaloneSingleFile,
           [switch] $VersionedArchives, [switch] $UnversionedArchives,
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
+          [switch] $NoTests, [switch] $SkipTests,
           [string] $PlanPath,
           [ValidateSet('Plan','Restore','Build','Test','Pack','Publish','Archive','Installer','Retain','Release')]
           [string[]] $Stages = @('Restore','Build','Test','Pack','Publish','Archive','Installer'), [switch] $PlanOnly)
@@ -68,12 +71,13 @@ function Invoke-AmithBuild {
         -not $PSBoundParameters.ContainsKey('StandaloneSingleFile') -and
         -not $PSBoundParameters.ContainsKey('VersionedArchives') -and -not $PSBoundParameters.ContainsKey('UnversionedArchives') -and
         -not $PSBoundParameters.ContainsKey('IncludeSymbols') -and -not $PSBoundParameters.ContainsKey('IncludeDevelopmentSettings') -and
+        -not $PSBoundParameters.ContainsKey('NoTests') -and -not $PSBoundParameters.ContainsKey('SkipTests') -and
         $PackageExcludes.Count -eq 0 -and (Test-Path -LiteralPath (Resolve-AmithPath $PlanPath))
     if ($reusePlan) { $plan = Read-AmithPlan (Resolve-AmithPath $PlanPath) }
     else {
         $arguments = @{ RootPath = $RootPath; Runtimes = $Runtimes; Exclude = $Exclude; Projects = $Projects; ProjectPath = $ProjectPath
             PackAllLibraries = $PackAllLibraries; NoPack = $NoPack }
-        foreach ($option in @('SelfContained','SingleFile','StandaloneSingleFile','VersionedArchives','UnversionedArchives','IncludeSymbols','IncludeDevelopmentSettings')) {
+        foreach ($option in @('SelfContained','SingleFile','StandaloneSingleFile','VersionedArchives','UnversionedArchives','IncludeSymbols','IncludeDevelopmentSettings','NoTests','SkipTests')) {
             if ($PSBoundParameters.ContainsKey($option)) { $arguments[$option] = $PSBoundParameters[$option] }
         }
         if ($PackageExcludes.Count) { $arguments.PackageExcludes = $PackageExcludes }

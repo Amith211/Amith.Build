@@ -69,9 +69,23 @@ function Invoke-AmithCompile {
 function Invoke-AmithTests {
     param($Plan)
     Assert-AmithStage $Plan Build
-    $executed = 0; $skipped = @()
-    foreach ($project in @($Plan.Projects | Where-Object Kind -eq 'Test')) {
-        if (@($project.TestFrameworks).Count -eq 0) { $skipped += $project.Name; Write-Warning "Skipping $($project.Name): its frameworks/platform policy are incompatible with this host."; continue }
+    $policy=Get-AmithTestPolicy $Plan
+    $projects=@($Plan.Projects | Where-Object Kind -eq 'Test')
+    $Plan.TestResults=@{ExecutedTargets=0;SkippedProjects=@();Disposition='Running'}
+    Assert-AmithNoTestsDeclaration $Plan.Projects $policy
+    if ($policy.NoTests) {
+        $Plan.TestResults.Disposition='NoTests'
+        Write-Warning 'NoTests: this plan intentionally contains no test projects.'
+        return
+    }
+    if ($policy.SkipTests) {
+        $Plan.TestResults.Disposition='Skipped'
+        $Plan.TestResults.SkippedProjects=@($projects | ForEach-Object Name)
+        Write-Warning 'SkipTests: test execution is explicitly bypassed for this plan.'
+        return
+    }
+    foreach ($project in $projects) {
+        if (@($project.TestFrameworks).Count -eq 0) { $Plan.TestResults.SkippedProjects += $project.Name; Write-Warning "Skipping $($project.Name): its frameworks/platform policy are incompatible with this host."; continue }
         foreach ($framework in $project.TestFrameworks) {
             # MTP is selected by the consuming repository's global.json. Traditional
             # VSTest projects use the positional project argument instead.
@@ -93,11 +107,14 @@ function Invoke-AmithTests {
             if ($testRunner -eq 'Microsoft.Testing.Platform') { $arguments += '--project' }
             $arguments += @($project.Path, '--framework', $framework, '--no-build') + @(Get-AmithBuildArguments $Plan) + @(Get-AmithTestArguments $framework)
             Invoke-AmithNative dotnet $arguments $Plan.Root
-            $executed++
+            $Plan.TestResults.ExecutedTargets++
         }
     }
-    $Plan.TestResults = @{ ExecutedTargets = $executed; SkippedProjects = $skipped }
-    if ($executed -eq 0) { Write-Warning 'No test target was executed. See the plan and TestResults for absent or host-incompatible tests.' }
+    if ($Plan.TestResults.ExecutedTargets -eq 0) {
+        if (-not $projects.Count) { throw 'No test projects were found. Declare NoTests for an intentionally test-free plan, or explicitly use SkipTests to bypass execution.' }
+        throw 'No test targets can run on this host. Check target frameworks and TestPlatforms, use a compatible runner, or explicitly use SkipTests. NoTests is only valid when no test projects are selected.'
+    }
+    $Plan.TestResults.Disposition='Executed'
 }
 
 function Invoke-AmithPack {

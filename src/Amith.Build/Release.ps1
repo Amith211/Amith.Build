@@ -3,8 +3,6 @@ function Assert-AmithReleaseArtifacts {
     if (-not $Plan.ExplicitVersion) { throw 'Release requires an explicitly supplied Version; local default versions cannot be published.' }
     Assert-AmithStage $Plan Build
     Assert-AmithStage $Plan Test
-    if ((ConvertTo-AmithBoolean (Get-AmithValue $Plan.Release 'RequireTestExecution' $false)) -and
-        (Get-AmithValue (Get-AmithValue $Plan 'TestResults' @{}) 'ExecutedTargets' 0) -eq 0) { throw 'Release requires at least one executed test target.' }
     foreach ($artifact in $Plan.Artifacts) {
         $producer = switch ($artifact.Kind) {
             NuGet { 'Pack' }; Symbols { 'Pack' }; PublishDirectory { 'Publish' }; Archive { 'Archive' }; Installer { 'Installer' }
@@ -19,6 +17,7 @@ function Assert-AmithReleaseArtifacts {
             }
         }
     }
+    Assert-AmithReleaseTestPolicy $Plan
 }
 
 function Invoke-AmithNuGetRelease {
