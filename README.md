@@ -292,6 +292,60 @@ Tests run only for host-compatible target frameworks and `TestPlatforms`. Window
 
 MTP and VSTest invocation are selected from the repository's `global.json` test runner setting. Test projects need their normal test SDK/adapter dependencies. The scripts do not install them or alter their target frameworks.
 
+## NuGet restore feeds
+
+The reusable workflow configures dependency feeds before Plan/Restore. Consumers supply JSON through the optional `NUGET_RESTORE_SOURCES` workflow secret; no consumer-maintained NuGet configuration file is required. Existing separate repository secrets can be used directly:
+
+```yaml
+jobs:
+  build:
+    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1
+    with:
+      version: ${{ inputs.version }}
+    secrets:
+      NUGET_RESTORE_SOURCES: |
+        [
+          {
+            "name": "Amith",
+            "url": "https://packages.example.invalid/v3/index.json",
+            "username": ${{ toJSON(secrets.NUGET_FEED_USERNAME) }},
+            "password": ${{ toJSON(secrets.NUGET_FEED_PASSWORD) }}
+          },
+          {
+            "name": "PublicExample",
+            "url": "https://public.example.invalid/v3/index.json"
+          }
+        ]
+```
+
+Use `toJSON` without extra surrounding quotes so special characters are escaped correctly. This constructs the payload from existing secrets; a combined repository secret is not necessary. URLs may also come from repository variables or secrets. The entire payload is passed through `secrets:`, because reusable-workflow `with:` inputs cannot reference repository secrets.
+
+| JSON field | Behaviour |
+| --- | --- |
+| `name` | Required unique source name. Names containing spaces are supported; duplicates differing only by case are rejected. |
+| `url` | Required absolute HTTP(S) URL or filesystem path. Embedded URL credentials are rejected. NuGet's normal HTTP/TLS policy still applies. |
+| `username`, `password` | Optional together. Supplied values must be nonempty strings; missing GitHub secrets fail validation. PATs use the password field and the username required by that feed. |
+| `validAuthenticationTypes` | Optional comma-separated restriction, such as `basic`. Requires explicit credentials. Omission preserves an existing restriction, or NuGet's normal negotiation when none exists. |
+
+Omitting both credential fields leaves NuGet's existing authentication discovery in place, including installed credential providers; it does not force anonymous access. This initial feature does not install providers or provision client certificates.
+
+The setup action adds/updates named sources in the .NET CLI's user-level configuration: `%APPDATA%/NuGet/NuGet.Config` on Windows and `~/.nuget/NuGet/NuGet.Config` on Linux/macOS. It preserves unrelated sources, source mapping, disabled sources, certificate settings and credentials. A newly created user configuration also includes nuget.org. Omitted/empty source lists make no configuration changes.
+
+Explicit credentials are exported as uniquely named process/job environment variables. Configuration stores only their `%VARIABLE_NAME%` references, never the supplied password or username. Existing encrypted passwords for an explicitly configured credential entry are replaced with the macro reference. No literal password is passed to a native command. Values are masked in GitHub logs and are not recorded in build plans or retained packages. The GitHub environment command file necessarily carries the values to later steps; keep runner job state ephemeral and rerun setup for each job.
+
+Repository NuGet policy is respected: a repository's `<clear />`, source override or disabled-source setting may shadow the user-level source. Setup reports a warning when a supplied URL is not enabled at the workspace root; it does not rewrite repository configuration. Nested project configurations can impose additional policy. Existing `NuGetPackageSourceCredentials_<name>` variables take precedence over configuration macros; setup warns and preserves them.
+
+For a consumer-owned workflow using individual composite stages, call the setup action after PowerShell/.NET setup and before Plan:
+
+```yaml
+- name: Configure NuGet restore feeds
+  uses: Amith211/Amith.Build/setup-nuget@v0.1
+  env:
+    AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
+```
+
+For local use, populate the same environment variable and run `scripts/Initialize-AmithNuGet.ps1` from the consumer root in the PowerShell session that will build. An optional `-ConfigPath` targets an explicitly chosen NuGet file, mainly for isolated testing; normal CI needs no file-path input. Restore authentication is separate from the publishing URL/API-key secrets described below.
+
 ## NuGet releases
 
 ```powershell
