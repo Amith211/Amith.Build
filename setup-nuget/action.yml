@@ -1,0 +1,10 @@
+name: Configure NuGet restore feeds
+description: Register feeds from AMITH_NUGET_RESTORE_SOURCES with job-scoped credential references.
+runs:
+  using: composite
+  steps:
+    - shell: pwsh
+      env:
+        AMITH_NUGET_SETUP_ROOT: ${{ github.action_path }}
+      run: |
+        & (Join-Path $env:AMITH_NUGET_SETUP_ROOT '../scripts/Initialize-AmithNuGet.ps1')

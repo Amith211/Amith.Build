@@ -75,6 +75,9 @@ on:
         type: boolean
         default: false
     secrets:
+      NUGET_RESTORE_SOURCES:
+        description: JSON array of restore sources and optional credentials; distinct from package-publishing credentials.
+        required: false
       NUGET_SOURCE_URL:
         required: false
       NUGET_API_KEY:
@@ -98,6 +101,10 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+      - name: Configure NuGet restore feeds
+        uses: Amith211/Amith.Build/setup-nuget@v0.1
+        env:
+          AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
       - name: Plan
         id: plan
         uses: Amith211/Amith.Build@v0.1
