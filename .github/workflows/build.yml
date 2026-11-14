@@ -1,0 +1,174 @@
+name: Shared build and release
+on:
+  workflow_call:
+    inputs:
+      version:
+        type: string
+        required: true
+      config:
+        type: string
+        default: ''
+      solution:
+        type: string
+        default: ''
+      project:
+        type: string
+        default: ''
+      runtimes:
+        type: string
+        default: ''
+      pack-projects:
+        type: string
+        default: ''
+      pack-only-projects:
+        type: string
+        default: ''
+      exclude-pack-projects:
+        type: string
+        default: ''
+      pack-all-libraries:
+        type: boolean
+        default: false
+      no-pack:
+        type: boolean
+        default: false
+      self-contained:
+        description: 'Optional true/false override; empty preserves project configuration/defaults.'
+        type: string
+        default: ''
+      single-file:
+        description: 'Optional true/false override; empty preserves project configuration/defaults.'
+        type: string
+        default: ''
+      standalone-single-file:
+        type: boolean
+        default: false
+      versioned-archives:
+        description: 'Optional true/false archive filename override; empty preserves configuration/defaults.'
+        type: string
+        default: ''
+      unversioned-archives:
+        type: boolean
+        default: false
+      include-symbols:
+        description: Optional true/false archive PDB override; empty preserves configuration (default true).
+        type: string
+        default: ''
+      include-development-settings:
+        description: Optional true/false development JSON override; empty preserves configuration (default false).
+        type: string
+        default: ''
+      package-excludes:
+        description: Additional newline-separated relative file globs.
+        type: string
+        default: ''
+      powershell-tag:
+        type: string
+        default: ''
+      runner-group:
+        type: string
+        default: bcs-runners
+      dotnet-version:
+        type: string
+        default: '10.0.x'
+      release:
+        type: boolean
+        default: false
+    secrets:
+      NUGET_SOURCE_URL:
+        required: false
+      NUGET_API_KEY:
+        required: false
+      RELEASE_TOKEN:
+        required: false
+jobs:
+  build:
+    runs-on:
+      group: ${{ inputs.runner-group }}
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up PowerShell
+        uses: milliewalky/setup-pwsh@v1
+        with:
+          tag: ${{ inputs.powershell-tag }}
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: ${{ inputs.dotnet-version }}
+      - name: Plan
+        id: plan
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Plan
+          config: ${{ inputs.config }}
+          solution: ${{ inputs.solution }}
+          project: ${{ inputs.project }}
+          version: ${{ inputs.version }}
+          runtimes: ${{ inputs.runtimes }}
+          pack-projects: ${{ inputs.pack-projects }}
+          pack-only-projects: ${{ inputs.pack-only-projects }}
+          exclude-pack-projects: ${{ inputs.exclude-pack-projects }}
+          pack-all-libraries: ${{ inputs.pack-all-libraries }}
+          no-pack: ${{ inputs.no-pack }}
+          self-contained: ${{ inputs.self-contained }}
+          single-file: ${{ inputs.single-file }}
+          standalone-single-file: ${{ inputs.standalone-single-file }}
+          versioned-archives: ${{ inputs.versioned-archives }}
+          unversioned-archives: ${{ inputs.unversioned-archives }}
+          include-symbols: ${{ inputs.include-symbols }}
+          include-development-settings: ${{ inputs.include-development-settings }}
+          package-excludes: ${{ inputs.package-excludes }}
+      - name: Restore
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Restore
+      - name: Build
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Build
+      - name: Test
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Test
+      - name: Pack NuGet libraries
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Pack
+      - name: Publish applications
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Publish
+      - name: Archive applications
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Archive
+      - name: Package configured installers
+        uses: Amith211/Amith.Build@v0.1
+        env:
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        with:
+          stage: Installer
+      - name: Select recorded artifacts for retention
+        id: retain
+        uses: Amith211/Amith.Build@v0.1
+        with:
+          stage: Retain
+      - name: Retain packaged artifacts
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ inputs.version }}
+          path: ${{ steps.retain.outputs.retained-root }}
+          if-no-files-found: warn
+          retention-days: 14
+      - name: Release
+        if: inputs.release
+        uses: Amith211/Amith.Build@v0.1
+        env:
+          NUGET_SOURCE_URL: ${{ secrets.NUGET_SOURCE_URL }}
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+          GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
+        with:
+          stage: Release

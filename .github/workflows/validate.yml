@@ -1,0 +1,29 @@
+name: Validate Amith.Build
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - src/**
+      - scripts/**
+      - tests/**
+      - action.yml
+      - .github/workflows/validate.yml
+permissions:
+  contents: read
+jobs:
+  validate:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Unit and integration checks
+        shell: pwsh
+        run: ./tests/Test-AmithBuild.ps1 -Integration

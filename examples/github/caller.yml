@@ -1,0 +1,22 @@
+# Consumer repository: .github/workflows/release.yml
+name: Release
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        required: true
+        type: string
+permissions:
+  contents: write
+jobs:
+  release:
+    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1
+    with:
+      version: ${{ inputs.version }}
+      config: amith.build.psd1
+      runner-group: Amith-runners
+      release: true
+    secrets:
+      NUGET_SOURCE_URL: ${{ secrets.NUGET_SOURCE_URL }}
+      NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+      RELEASE_TOKEN: ${{ secrets.RELEASE_TOKEN }}

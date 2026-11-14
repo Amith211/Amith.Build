@@ -1,0 +1,46 @@
+# Use this route when an Org consumes a PRIVATE Amith211/Amith.Build.
+# Direct reusable-workflow sharing across these owners is not supported.
+name: Private build tools example
+on: workflow_dispatch
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on:
+      group: bcs-runners
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/checkout@v7
+        with:
+          repository: Amith211/Amith.Build
+          ref: v0.1
+          path: .amith-tools
+          token: ${{ secrets.BUILD_TOOLS_TOKEN }}
+          persist-credentials: false
+      - name: Set up PowerShell
+        uses: milliewalky/setup-pwsh@v1
+      - uses: actions/setup-dotnet@v6
+        with:
+          dotnet-version: '10.0.x'
+      - name: Plan
+        uses: ./.amith-tools
+        with:
+          stage: Plan
+          config: amith.build.psd1
+          version: 1.2.3
+      - name: Restore
+        uses: ./.amith-tools
+        with:
+          stage: Restore
+      - name: Build
+        uses: ./.amith-tools
+        with:
+          stage: Build
+      - name: Test
+        uses: ./.amith-tools
+        with:
+          stage: Test
+      - name: Package
+        uses: ./.amith-tools
+        with:
+          stage: Pack,Publish,Archive,Installer

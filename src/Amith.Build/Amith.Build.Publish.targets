@@ -1,0 +1,27 @@
+<Project>
+  <!-- Preserve an existing consumer extension before applying our policy. -->
+  <Import Project="$(AmithOriginalCustomAfterMicrosoftCommonTargets)"
+          Condition="'$(AmithOriginalCustomAfterMicrosoftCommonTargets)' != '' and '$(AmithOriginalCustomAfterMicrosoftCommonTargets)' != '$(MSBuildThisFileFullPath)' and Exists('$(AmithOriginalCustomAfterMicrosoftCommonTargets)')" />
+  <Target Name="_AmithExcludeDevelopmentContent" BeforeTargets="AssignTargetPaths"
+          Condition="'$(AmithIncludeDevelopmentSettings)' != 'true'">
+    <ItemGroup>
+      <Content Update="@(Content)" Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(Content.Filename)%(Content.Extension)', '(?i)^(.*\.Development|Development)\.json$'))">
+        <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+      </Content>
+      <None Update="@(None)" Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(None.Filename)%(None.Extension)', '(?i)^(.*\.Development|Development)\.json$'))">
+        <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+      </None>
+    </ItemGroup>
+  </Target>
+  <!-- Filter resolved/transitive items before the SDK bundles them, and before
+       copying non-bundled output. Custom AfterTargets=Publish copies are checked
+       separately by the prepared packaging-folder policy. -->
+  <Target Name="_AmithFilterDevelopmentPublishItems" AfterTargets="ComputeResolvedFilesToPublishList"
+          BeforeTargets="_ComputeFilesToBundle;CopyFilesToPublishDirectory"
+          Condition="'$(AmithIncludeDevelopmentSettings)' != 'true'">
+    <ItemGroup>
+      <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+          Condition="$([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.Filename)%(ResolvedFileToPublish.Extension)', '(?i)^(.*\.Development|Development)\.json$')) or $([System.Text.RegularExpressions.Regex]::IsMatch('%(ResolvedFileToPublish.RelativePath)', '(?i)(^|[\\/])(.*\.Development|Development)\.json$'))" />
+    </ItemGroup>
+  </Target>
+</Project>

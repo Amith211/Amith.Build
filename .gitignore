@@ -1,0 +1,26 @@
+**/bin/
+**/obj/
+.vs/
+.idea/
+.amith-build/
+.amith-tools/
+artifacts/
+TestResults/
+*.user
+*.nupkg
+*.snupkg
+
+# Local credentials, signing material and accidental package output
+.env
+.env.*
+!.env.example
+!.env.sample
+*.log
+*.pfx
+*.p12
+*.key
+*.pem
+*.snk
+*.zip
+*.tar.gz
+*.tgz

@@ -1,0 +1,141 @@
+name: Amith.Build stage
+description: Run a shared .NET build stage using a persisted build plan.
+inputs:
+  stage:
+    description: Plan, Restore, Build, Test, Pack, Publish, Archive, Installer, Retain, or Release (comma-separated stages are supported).
+    required: true
+  config:
+    description: Optional project configuration relative to root; auto-discovery is used when omitted.
+    default: ''
+  root:
+    description: Consumer repository root, relative to the GitHub workspace.
+    default: '.'
+  solution:
+    description: Optional solution path; required only when discovery is ambiguous.
+    default: ''
+  project:
+    description: Optional single project path instead of whole-solution discovery.
+    default: ''
+  version:
+    description: SemVer package/release version, supplied to Plan.
+    default: ''
+  runtimes:
+    description: Optional runtime list, for example win-x64,linux-x64. Windows-only apps automatically retain Windows targets.
+    default: ''
+  pack-projects:
+    description: Comma-separated exact project names to add to the configured package selection (Plan only).
+    default: ''
+  pack-only-projects:
+    description: Comma-separated exact project names replacing the configured package selection (Plan only).
+    default: ''
+  exclude-pack-projects:
+    description: Comma-separated exact library names to exclude from packaging (Plan only).
+    default: ''
+  pack-all-libraries:
+    description: Package all eligible libraries (Plan only).
+    default: 'false'
+  no-pack:
+    description: Disable NuGet package creation for this plan.
+    default: 'false'
+  self-contained:
+    description: Optional true/false application publish override; empty preserves configuration/defaults (Plan only).
+    default: ''
+  single-file:
+    description: Optional true/false PublishSingleFile override; empty preserves configuration/defaults (Plan only).
+    default: ''
+  standalone-single-file:
+    description: Enable self-contained and single-file application publishing together (Plan only).
+    default: 'false'
+  versioned-archives:
+    description: Optional true/false archive filename override; empty preserves configuration (default false). Plan only.
+    default: ''
+  unversioned-archives:
+    description: Convenience option to omit the archive filename version; mutually exclusive with versioned-archives. Plan only.
+    default: 'false'
+  include-symbols:
+    description: Optional true/false loose PDB inclusion for archives (default true); Velopack still excludes PDBs. Plan only.
+    default: ''
+  include-development-settings:
+    description: Optional true/false development JSON inclusion (default false). Plan only.
+    default: ''
+  package-excludes:
+    description: Additional newline-separated relative file globs for all application packages. Plan only.
+    default: ''
+  plan:
+    description: Saved build plan, relative to the consumer workspace.
+    default: '.amith-build/plan.json'
+outputs:
+  plan-path:
+    description: Absolute saved build-plan path.
+    value: ${{ steps.stage.outputs.plan_path }}
+  output-root:
+    description: Isolated output directory for this plan/run.
+    value: ${{ steps.stage.outputs.output_root }}
+  retained-root:
+    description: Directory containing only recorded package artifacts, set by Retain.
+    value: ${{ steps.stage.outputs.retained_root }}
+runs:
+  using: composite
+  steps:
+    - id: stage
+      shell: pwsh
+      env:
+        AMITH_ACTION_ROOT: ${{ github.action_path }}
+        AMITH_STAGES: ${{ inputs.stage }}
+        AMITH_CONFIG: ${{ inputs.config }}
+        AMITH_ROOT: ${{ inputs.root }}
+        AMITH_SOLUTION: ${{ inputs.solution }}
+        AMITH_PROJECT: ${{ inputs.project }}
+        AMITH_VERSION: ${{ inputs.version }}
+        AMITH_RUNTIMES: ${{ inputs.runtimes }}
+        AMITH_PACK_PROJECTS: ${{ inputs.pack-projects }}
+        AMITH_PACK_ONLY_PROJECTS: ${{ inputs.pack-only-projects }}
+        AMITH_EXCLUDE_PACK_PROJECTS: ${{ inputs.exclude-pack-projects }}
+        AMITH_PACK_ALL_LIBRARIES: ${{ inputs.pack-all-libraries }}
+        AMITH_NO_PACK: ${{ inputs.no-pack }}
+        AMITH_SELF_CONTAINED: ${{ inputs.self-contained }}
+        AMITH_SINGLE_FILE: ${{ inputs.single-file }}
+        AMITH_STANDALONE_SINGLE_FILE: ${{ inputs.standalone-single-file }}
+        AMITH_VERSIONED_ARCHIVES: ${{ inputs.versioned-archives }}
+        AMITH_UNVERSIONED_ARCHIVES: ${{ inputs.unversioned-archives }}
+        AMITH_INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
+        AMITH_INCLUDE_DEVELOPMENT_SETTINGS: ${{ inputs.include-development-settings }}
+        AMITH_PACKAGE_EXCLUDES: ${{ inputs.package-excludes }}
+        AMITH_PLAN: ${{ inputs.plan }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $stages = @($env:AMITH_STAGES -split ',' | ForEach-Object Trim | Where-Object { $_ })
+        $arguments = @{ Stages = $stages; PlanPath = Join-Path $env:GITHUB_WORKSPACE $env:AMITH_PLAN }
+        if ($stages -icontains 'Plan') {
+          $arguments.RootPath = Join-Path $env:GITHUB_WORKSPACE $env:AMITH_ROOT
+          if ($env:AMITH_CONFIG) { $arguments.ConfigPath = $env:AMITH_CONFIG }
+          if ($env:AMITH_SOLUTION) { $arguments.Solution = $env:AMITH_SOLUTION }
+          if ($env:AMITH_PROJECT) { $arguments.ProjectPath = @($env:AMITH_PROJECT) }
+          if ($env:AMITH_VERSION) { $arguments.Version = $env:AMITH_VERSION }
+          if ($env:AMITH_RUNTIMES) { $arguments.Runtimes = @($env:AMITH_RUNTIMES -split ',' | ForEach-Object Trim | Where-Object { $_ }) }
+          foreach ($entry in @(
+            @{ Name = 'PackProjects'; Value = $env:AMITH_PACK_PROJECTS },
+            @{ Name = 'PackOnlyProjects'; Value = $env:AMITH_PACK_ONLY_PROJECTS },
+            @{ Name = 'ExcludePackProjects'; Value = $env:AMITH_EXCLUDE_PACK_PROJECTS }
+          )) {
+            if ($entry.Value) { $arguments[$entry.Name] = @($entry.Value -split ',' | ForEach-Object Trim | Where-Object { $_ }) }
+          }
+          $arguments.PackAllLibraries = [bool]::Parse($env:AMITH_PACK_ALL_LIBRARIES)
+          $arguments.NoPack = [bool]::Parse($env:AMITH_NO_PACK)
+          if ($env:AMITH_SELF_CONTAINED) { $arguments.SelfContained = [bool]::Parse($env:AMITH_SELF_CONTAINED) }
+          if ($env:AMITH_SINGLE_FILE) { $arguments.SingleFile = [bool]::Parse($env:AMITH_SINGLE_FILE) }
+          if ([bool]::Parse($env:AMITH_STANDALONE_SINGLE_FILE)) { $arguments.StandaloneSingleFile = $true }
+          if ($env:AMITH_INCLUDE_SYMBOLS) { $arguments.IncludeSymbols = [bool]::Parse($env:AMITH_INCLUDE_SYMBOLS) }
+          if ($env:AMITH_INCLUDE_DEVELOPMENT_SETTINGS) { $arguments.IncludeDevelopmentSettings = [bool]::Parse($env:AMITH_INCLUDE_DEVELOPMENT_SETTINGS) }
+          if ($env:AMITH_PACKAGE_EXCLUDES) { $arguments.PackageExcludes = @($env:AMITH_PACKAGE_EXCLUDES -split '\r?\n' | ForEach-Object Trim | Where-Object { $_ }) }
+          if ($env:AMITH_VERSIONED_ARCHIVES) { $arguments.VersionedArchives = [bool]::Parse($env:AMITH_VERSIONED_ARCHIVES) }
+          if ([bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) { $arguments.UnversionedArchives = $true }
+        }
+        elseif ($env:AMITH_PACK_PROJECTS -or $env:AMITH_PACK_ONLY_PROJECTS -or $env:AMITH_EXCLUDE_PACK_PROJECTS -or
+                [bool]::Parse($env:AMITH_PACK_ALL_LIBRARIES) -or [bool]::Parse($env:AMITH_NO_PACK) -or
+                $env:AMITH_SELF_CONTAINED -or $env:AMITH_SINGLE_FILE -or [bool]::Parse($env:AMITH_STANDALONE_SINGLE_FILE) -or
+                $env:AMITH_INCLUDE_SYMBOLS -or $env:AMITH_INCLUDE_DEVELOPMENT_SETTINGS -or $env:AMITH_PACKAGE_EXCLUDES -or
+                $env:AMITH_VERSIONED_ARCHIVES -or [bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) {
+          throw 'Packaging and deployment inputs must be supplied to the Plan stage; later stages reuse its selections.'
+        }
+        & (Join-Path $env:AMITH_ACTION_ROOT 'scripts/Invoke-AmithBuild.ps1') @arguments
