@@ -36,7 +36,7 @@ jobs:
         with:
           node-version: '24'
       - name: Node action unit and process checks
-        run: node --test tests/ToolCacheChecks.cjs tests/RunnerDiagnosticsChecks.cjs
+        run: node --test tests/ToolCacheChecks.cjs tests/RunnerDiagnosticsChecks.cjs tests/ArtifactRetentionChecks.cjs
       - name: Cold shared tool setup
         id: tools
         uses: ./setup-tools

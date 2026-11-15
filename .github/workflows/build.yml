@@ -136,7 +136,7 @@ jobs:
       contents: write
     steps:
       - name: Register runner diagnostics
-        uses: Amith211/Amith.Build/runner-diagnostics@v0.1.4
+        uses: Amith211/Amith.Build/runner-diagnostics@v0.1.5
         with:
           keep-runner-alive: ${{ inputs.keep-runner-alive }}
           keep-runner-alive-minutes: ${{ inputs.keep-runner-alive-minutes }}
@@ -157,7 +157,7 @@ jobs:
           fi
           zstd --version
       - name: Set up shared build tools
-        uses: Amith211/Amith.Build/setup-tools@v0.1.4
+        uses: Amith211/Amith.Build/setup-tools@v0.1.5
         with:
           powershell-tag: ${{ inputs.powershell-tag }}
           gh-version: ${{ inputs.gh-version }}
@@ -170,17 +170,17 @@ jobs:
         run: |
           if ($env:AMITH_SDK -and $env:AMITH_LEGACY_SDK) { throw 'Use sdk-version or its legacy dotnet-version alias, not both.' }
       - name: Bootstrap .NET SDKs
-        uses: Amith211/Amith.Build/setup-dotnet@v0.1.4
+        uses: Amith211/Amith.Build/setup-dotnet@v0.1.5
         with:
           sdk-version: ${{ inputs.sdk-version || inputs.dotnet-version || 'auto' }}
           additional-sdks: ${{ inputs.additional-sdks }}
       - name: Configure NuGet restore feeds
-        uses: Amith211/Amith.Build/setup-nuget@v0.1.4
+        uses: Amith211/Amith.Build/setup-nuget@v0.1.5
         env:
           AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
       - name: Plan
         id: plan
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Plan
           config: ${{ inputs.config }}
@@ -206,53 +206,58 @@ jobs:
           include-development-settings: ${{ inputs.include-development-settings }}
           package-excludes: ${{ inputs.package-excludes }}
       - name: Restore
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Restore
       - name: Build
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Build
       - name: Test
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Test
       - name: Pack NuGet libraries
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Pack
       - name: Publish applications
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Publish
       - name: Archive applications
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         with:
           stage: Archive
       - name: Package configured installers
-        uses: Amith211/Amith.Build@v0.1.4
+        id: installer
+        uses: Amith211/Amith.Build@v0.1.5
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         with:
           stage: Installer
-      - name: Select recorded artifacts for retention
-        id: retain
-        uses: Amith211/Amith.Build@v0.1.4
-        with:
-          stage: Retain
-      - name: Retain packaged artifacts
-        uses: actions/upload-artifact@v7
-        with:
-          name: packages-${{ inputs.version }}
-          path: ${{ steps.retain.outputs.retained-root }}
-          if-no-files-found: warn
-          retention-days: 14
       - name: Release
+        id: release
         if: inputs.release
-        uses: Amith211/Amith.Build@v0.1.4
+        uses: Amith211/Amith.Build@v0.1.5
         env:
           NUGET_SOURCE_URL: ${{ secrets.NUGET_SOURCE_URL }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         with:
           stage: Release
+      - name: Select recorded artifacts for retention
+        id: retain
+        if: ${{ !cancelled() && steps.installer.outcome == 'success' && (!inputs.release || steps.release.outcome == 'failure') }}
+        uses: Amith211/Amith.Build@v0.1.5
+        with:
+          stage: Retain
+      - name: Retain packaged artifacts
+        id: upload
+        if: ${{ !cancelled() && steps.retain.outcome == 'success' && steps.retain.outputs.retained-root != '' }}
+        uses: actions/upload-artifact@v7
+        with:
+          name: packages-${{ inputs.version }}
+          path: ${{ steps.retain.outputs.retained-root }}
+          if-no-files-found: warn
+          retention-days: 14
