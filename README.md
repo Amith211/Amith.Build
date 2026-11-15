@@ -336,7 +336,7 @@ The reusable workflow configures dependency feeds before Plan/Restore. Consumers
 ```yaml
 jobs:
   build:
-    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.3
+    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.4
     with:
       version: ${{ inputs.version }}
     secrets:
@@ -376,7 +376,7 @@ For a consumer-owned workflow using individual composite stages, call the setup 
 
 ```yaml
 - name: Configure NuGet restore feeds
-  uses: Amith211/Amith.Build/setup-nuget@v0.1.3
+  uses: Amith211/Amith.Build/setup-nuget@v0.1.4
   env:
     AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
 ```
@@ -451,26 +451,26 @@ Completed Velopack channel uploads are recorded in the plan and verified against
 
 ```yaml
 - name: Plan
-  uses: Amith211/Amith.Build@v0.1.3
+  uses: Amith211/Amith.Build@v0.1.4
   with:
     stage: Plan
     config: amith.build.psd1
     version: ${{ inputs.version }}
     runtimes: win-x64,linux-x64
 - name: Restore
-  uses: Amith211/Amith.Build@v0.1.3
+  uses: Amith211/Amith.Build@v0.1.4
   with:
     stage: Restore
 - name: Build
-  uses: Amith211/Amith.Build@v0.1.3
+  uses: Amith211/Amith.Build@v0.1.4
   with:
     stage: Build
 - name: Test
-  uses: Amith211/Amith.Build@v0.1.3
+  uses: Amith211/Amith.Build@v0.1.4
   with:
     stage: Test
 - name: Package
-  uses: Amith211/Amith.Build@v0.1.3
+  uses: Amith211/Amith.Build@v0.1.4
   with:
     stage: Pack,Publish,Archive,Installer
 ```
@@ -480,7 +480,7 @@ The caller checks out its source and sets up SDKs first. The action runs on the 
 `examples/github/caller.yml` demonstrates the complete reusable workflow, with:
 
 ```yaml
-uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.3
+uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.4
 with:
   version: ${{ inputs.version }}
   runner-group: Amith-runners
@@ -488,7 +488,7 @@ with:
   release: true
 ```
 
-The reusable workflow calls the matching `@v0.1.3` actions for each stage. Published version tags remain fixed. Patch releases use new tags such as `v0.1.2`; consumers select the version they want to test or adopt. Incompatible changes can occur while the tooling is prerelease and should be documented in release notes.
+The reusable workflow calls the matching `@v0.1.4` actions for each stage. Published version tags remain fixed. Patch releases use new tags such as `v0.1.2`; consumers select the version they want to test or adopt. Incompatible changes can occur while the tooling is prerelease and should be documented in release notes.
 
 The reusable full-release workflow requests `contents: write` for GitHub release support. A NuGet-only consumer can use the composite action with `contents: read`. Supply `NUGET_SOURCE_URL`/`NUGET_API_KEY` for feed publishing and `RELEASE_TOKEN` when a custom GitHub token is needed. The built-in caller token is the default GitHub token. `vpk` is needed only when Installer is enabled for a project; project-specific Velopack tools are isolated rather than globally updated. The reusable workflow bootstraps PowerShell and GitHub CLI through the shared setup-tools action; `powershell-tag` can pin its release.
 
@@ -522,7 +522,7 @@ This keeps the job allocated; it does not start SSH services or an interactive s
 Consumer-owned workflows can register the same action before their other steps. Use a 360-minute job timeout to match the shared budget; a shorter job/step timeout can terminate the hold earlier:
 
 ~~~yaml
-- uses: Amith211/Amith.Build/runner-diagnostics@v0.1.3
+- uses: Amith211/Amith.Build/runner-diagnostics@v0.1.4
   with:
     keep-runner-alive: true
     keep-runner-alive-minutes: -1
@@ -567,7 +567,7 @@ Linux shared builds also check/install zstd using apt-get (with sudo for non-roo
 Consumer-owned workflows can use the same setup without the reusable workflow:
 
 ~~~yaml
-- uses: Amith211/Amith.Build/setup-tools@v0.1.3
+- uses: Amith211/Amith.Build/setup-tools@v0.1.4
   with:
     tool-cache-path: /opt/hostedtoolcache
     # powershell-tag: v7.7.0
@@ -606,7 +606,7 @@ The shared workflow exposes sdk-version and comma/newline-separated additional-s
 For consumer-owned workflows, use setup-tools first (PowerShell bootstrap), then setup-dotnet before configuring restore feeds and calling Plan:
 
 ~~~yaml
-- uses: Amith211/Amith.Build/setup-dotnet@v0.1.3
+- uses: Amith211/Amith.Build/setup-dotnet@v0.1.4
   with:
     sdk-version: auto
     additional-sdks: |
@@ -630,3 +630,9 @@ SDK setup does not install OS prerequisites, native compilers, workloads or cred
 Planning and SDK setup print timestamped start/completion messages with elapsed seconds. These identify metadata requests, installed-SDK searches, SDK downloads/checksums/extraction, profile preparation, support/compiler directory copies, solution discovery and individual project evaluation. Cache hits remain visible, and contended SDK cache locks report waiting progress every 30 seconds.
 
 These messages are enabled by default and use the PowerShell information stream, preserving operation return values and failures. They log operation labels, SDK versions and filesystem paths rather than environment dumps, credentials or command arguments. A start message without its corresponding completion identifies the operation still running; the enclosing completion includes time spent in nested work. Additional installed SDKs can add profile-copy work even when no SDK download is needed.
+
+### Metadata query startup
+
+Planning evaluates projects with the MSBuild.dll belonging to the SDK already selected by the native host. This avoids CLI-dispatch overhead observed with SDK 11 on persistent runners. The same host, working directory, MSBuild properties and consumer imports are retained; SDK selection and global.json policy are unchanged. Restore, compilation, tests and publishing continue through the normal dotnet CLI.
+
+A runner benchmark returned identical metadata across the CLI and direct entry point, with approximately 9.8–10.1 seconds per CLI query versus 0.85–0.95 seconds directly. These measurements describe that runner, not a universal SDK performance guarantee. Cold SDK-profile construction is a separate cost and is still reported by the planning timings.
