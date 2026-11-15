@@ -59,6 +59,33 @@ Check 'glob matching handles root files, nested paths and project names' {
     Assert-True (& $module { Test-AmithPattern 'tests/Api.Tests/Api.Tests.csproj' '*.Tests' })
     Assert-True (-not (& $module { Test-AmithPattern 'src/Api/Api.csproj' 'tests/**' }))
 }
+Check 'metadata uses the selected SDK entry point and fails clearly if it is missing' {
+    $root=Join-Path $testRoot 'metadata-sdk'
+    $directory=Join-Path $root 'sdk/11.0.100'
+    [void][IO.Directory]::CreateDirectory($directory)
+    $entry=Join-Path $directory 'MSBuild.dll'
+    Set-Content $entry 'fixture'
+    $execution=@{Root=$root;Version='11.0.100';Dotnet=(Join-Path $root 'dotnet')}
+    $result=& $module {
+        param($execution,$entry)
+        $original=(Get-Item Function:Invoke-AmithNative).ScriptBlock
+        try{
+            $script:MetadataProbe=$null
+            function script:Invoke-AmithNative {
+                param($File,$Arguments,$WorkingDirectory,[switch]$Capture)
+                $script:MetadataProbe=@{File=$File;Entry=$Arguments[0];Directory=$WorkingDirectory}
+                return '{"Properties":{"TargetFramework":"net10.0"},"Items":{"PackageReference":[]}}'
+            }
+            $metadata=Get-AmithProjectMetadata 'Fixture.csproj' Release '1.0.0' $execution
+            @{Probe=$script:MetadataProbe;Metadata=$metadata}
+        }finally{Set-Item Function:script:Invoke-AmithNative $original}
+    } $execution $entry
+    Assert-Equal $execution.Dotnet $result.Probe.File
+    Assert-Equal $entry $result.Probe.Entry
+    Assert-Equal 'net10.0' $result.Metadata.TargetFramework
+    $missing=@{Root=$root;Version='10.0.404';Dotnet=$execution.Dotnet}
+    Assert-Throws {& $module {param($execution)Get-AmithProjectMetadata 'Fixture.csproj' Release '1.0.0' $execution} $missing} '*missing*MSBuild entry point*'
+}
 Check 'invalid and shell-like versions are rejected' {
     foreach ($value in @('v1.2.3','1.2','1.2.3+metadata','1.2.3;echo bad')) { Assert-Throws { & $module {param($v) Assert-AmithVersion $v} $value } '*Version must*' }
     & $module { Assert-AmithVersion '1.2.3-rc.1' }

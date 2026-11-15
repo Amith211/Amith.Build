@@ -50,3 +50,29 @@ Check 'SDK bootstrap script exports the selected host for subsequent workflow st
         }
     }
 }
+
+
+Check 'selected SDK direct MSBuild evaluation matches CLI metadata and preserves consumer hooks' {
+    $root=Join-Path $testRoot 'direct-metadata'
+    [void][IO.Directory]::CreateDirectory($root)
+    Set-Content (Join-Path $root 'global.json') '{"test":{"runner":"VSTest"}}'
+    Set-Content (Join-Path $root 'consumer.targets') '<Project><PropertyGroup><AssemblyName>ImportedMetadataName</AssemblyName></PropertyGroup></Project>'
+    Set-Content (Join-Path $root 'App.csproj') @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><CustomAfterMicrosoftCommonTargets>$(MSBuildProjectDirectory)/consumer.targets</CustomAfterMicrosoftCommonTargets></PropertyGroup>
+  <ItemGroup><PackageReference Include="Example.Metadata.Package" Version="1.2.3" /></ItemGroup>
+</Project>
+'@
+    $project=Join-Path $root 'App.csproj'
+    foreach($selector in @('10','11')){
+        $scope=& $module {param($root,$selector)Open-AmithSdkScope $root $selector} $root $selector
+        try{
+            $cli=& $module {param($project)Get-AmithProjectMetadata $project Release '0.0.0-metadata'} $project
+            $direct=& $module {param($project,$execution)Get-AmithProjectMetadata $project Release '0.0.0-metadata' $execution} $project $scope.Execution
+            Assert-Equal $cli $direct
+            Assert-Equal 'ImportedMetadataName' $direct.AssemblyName
+            Assert-Equal @('Example.Metadata.Package') $direct.TestPackages
+            Assert-Equal (Join-Path $root 'consumer.targets') $direct.CustomAfterMicrosoftCommonTargets.Replace('/',[IO.Path]::DirectorySeparatorChar)
+        }finally{& $module {param($scope)Close-AmithSdkScope $scope} $scope}
+    }
+}

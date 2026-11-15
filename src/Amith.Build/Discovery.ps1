@@ -1,7 +1,18 @@
 function Get-AmithProjectMetadata {
-    param([string] $Path, [string] $Configuration, [string] $Version)
+    param([string] $Path, [string] $Configuration, [string] $Version, $SdkExecution = $null)
+    $hostCommand='dotnet'
+    $entryPoint='msbuild'
+    $workingDirectory=$script:AmithSdkWorkingDirectory
+    if($SdkExecution){
+        $sdkRoot=[string](Get-AmithValue $SdkExecution 'Root' '')
+        $sdkVersion=[string](Get-AmithValue $SdkExecution 'Version' '')
+        $hostCommand=[string](Get-AmithValue $SdkExecution 'Dotnet' '')
+        if(-not $sdkRoot -or -not $sdkVersion -or -not $hostCommand){throw 'SDK execution context is incomplete for metadata evaluation.'}
+        $entryPoint=Join-Path $sdkRoot "sdk/$sdkVersion/MSBuild.dll"
+        if(-not (Test-Path -LiteralPath $entryPoint -PathType Leaf)){throw "Selected SDK $sdkVersion is missing its MSBuild entry point. Recreate the SDK profile."}
+    }
     $properties = 'OutputType,IsTestProject,IsPackable,TargetFramework,TargetFrameworks,RuntimeIdentifier,RuntimeIdentifiers,UseWPF,UseWindowsForms,UsingMicrosoftNETSdkWeb,PackageId,AssemblyName,ProjectAssetsFile,CustomAfterMicrosoftCommonTargets'
-    $lines = @(Invoke-AmithTimed "Evaluate project $([IO.Path]::GetFileName($Path))" {Invoke-AmithNative dotnet @('msbuild', $Path, '-nologo', "-p:Configuration=$Configuration", "-p:Version=$Version", '-p:EnableWindowsTargeting=true', "-getProperty:$properties", '-getItem:PackageReference') -Capture})
+    $lines = @(Invoke-AmithTimed "Evaluate project $([IO.Path]::GetFileName($Path))" {Invoke-AmithNative $hostCommand @($entryPoint, $Path, '-nologo', "-p:Configuration=$Configuration", "-p:Version=$Version", '-p:EnableWindowsTargeting=true', "-getProperty:$properties", '-getItem:PackageReference') $workingDirectory -Capture})
     $text = $lines -join "`n"
     $match = [regex]::Match($text, '(?s)\{.*\}')
     if (-not $match.Success) { throw "MSBuild did not return evaluated project properties for $Path" }
@@ -22,8 +33,8 @@ function Get-AmithSolutionProjects {
 }
 
 function Get-AmithProjectPlan {
-    param([string] $Path, $Settings, [string] $Root, [string] $Configuration, [string[]] $DefaultRuntimes, [string] $Version, [System.Collections.IDictionary] $DeploymentOverrides = @{})
-    $metadata = Get-AmithProjectMetadata $Path $Configuration $Version
+    param([string] $Path, $Settings, [string] $Root, [string] $Configuration, [string[]] $DefaultRuntimes, [string] $Version, [System.Collections.IDictionary] $DeploymentOverrides = @{}, $SdkExecution = $null)
+    $metadata = Get-AmithProjectMetadata $Path $Configuration $Version $SdkExecution
     $frameworkText = [string](Get-AmithValue $metadata 'TargetFrameworks' '')
     if (-not $frameworkText) { $frameworkText = [string](Get-AmithValue $metadata 'TargetFramework' '') }
     $frameworks = @($frameworkText -split ';' | ForEach-Object Trim | Where-Object { $_ })
@@ -213,7 +224,7 @@ function New-AmithBuildPlan {
             }
             $settings.PackageExcludes = @(Get-AmithValue $settings 'PackageExcludes' @()) + $PackageExcludes
             $evaluations += @{Path=$path;Settings=$settings}
-            $planned += Get-AmithProjectPlan $path $settings $root $configuration $Runtimes $Version $deploymentOverrides
+            $planned += Get-AmithProjectPlan $path $settings $root $configuration $Runtimes $Version $deploymentOverrides $sdkScope.Execution
         }
         if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
         $bootstrapVersion = if ($sdkScope.Execution) { $sdkScope.Execution.Version } else { '' }
@@ -223,7 +234,7 @@ function New-AmithBuildPlan {
             # Read SDK-dependent defaults again under the SDK that will actually build.
             $planned = @()
             foreach ($evaluation in $evaluations) {
-                $planned += Get-AmithProjectPlan $evaluation.Path $evaluation.Settings $root $configuration $Runtimes $Version $deploymentOverrides
+                $planned += Get-AmithProjectPlan $evaluation.Path $evaluation.Settings $root $configuration $Runtimes $Version $deploymentOverrides $sdkExecution
             }
             $channel = Get-AmithFrameworkSdkChannel @($planned | ForEach-Object { $_.Frameworks })
             if ($channel -and $channel -cne (Get-AmithSdkVersionParts $sdkExecution.Version).Channel) {
