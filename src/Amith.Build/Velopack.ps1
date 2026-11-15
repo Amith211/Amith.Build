@@ -89,8 +89,14 @@ function Get-AmithVelopackUploadNames {
 
 function Get-AmithGitHubDraft {
     param($Plan, [string] $Repository, [string] $Tag)
-    $encodedTag = [uri]::EscapeDataString($Tag)
-    $json = @(Invoke-AmithNative gh @('api', "repos/$Repository/releases/tags/$encodedTag") $Plan.Root -Capture) -join "`n"
+    # Drafts can be absent from REST's by-tag endpoint. Resolve through gh's
+    # draft-aware lookup, then read raw asset IDs/digests from the release-ID API.
+    $lookupJson = @(Invoke-AmithNative gh @('release', 'view', $Tag, '--repo', $Repository, '--json', 'apiUrl') $Plan.Root -Capture) -join "`n"
+    $lookup = $lookupJson | ConvertFrom-Json -AsHashtable
+    if (-not $lookup.apiUrl -or $lookup.apiUrl -notmatch ('/repos/' + [regex]::Escape($Repository) + '/releases/[0-9]+$')) {
+        throw 'GitHub draft lookup did not return the expected repository release API URL.'
+    }
+    $json = @(Invoke-AmithNative gh @('api', [string]$lookup.apiUrl) $Plan.Root -Capture) -join "`n"
     $release = $json | ConvertFrom-Json -AsHashtable
     if (-not $release.draft -or $release.tag_name -cne $Tag) { throw 'Velopack uploads require the expected GitHub draft release.' }
     return $release

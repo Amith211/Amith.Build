@@ -22,7 +22,7 @@ permissions:
   contents: write
 jobs:
   release:
-    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.6
+    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.7
     with:
       version: ${{ inputs.version }}
       config: amith.build.psd1

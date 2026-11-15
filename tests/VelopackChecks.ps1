@@ -151,5 +151,24 @@ Check 'prerelease downloads uploads and GitHub metadata use the same version pol
     Assert-True @(Get-VpkCalls upload)[0].Arguments.Contains('--pre')
     Assert-True @($state.Calls|Where-Object{$_.File -eq 'gh' -and $_.Arguments[1] -eq 'create'})[0].Arguments.Contains('--prerelease')
 }
+
+Check 'draft lookup resolves release ID instead of the by-tag endpoint that hides drafts' {
+    $p=New-VelopackFixture
+    $state.Remote=@{tag_name='v1.2.3';draft=$true;assets=@()}
+    $state.Calls.Clear()
+    $draft=& $module {param($p)Get-AmithGitHubDraft $p 'Amith211/Example' 'v1.2.3'} $p
+    Assert-True $draft.draft
+    $calls=@($state.Calls)
+    Assert-Equal @('release','view','v1.2.3','--repo','Amith211/Example','--json','apiUrl') $calls[0].Arguments
+    Assert-Equal @('api','https://api.github.com/repos/Amith211/Example/releases/42') $calls[1].Arguments
+}
+Check 'draft-aware lookup still rejects published or mismatched releases' {
+    $p=New-VelopackFixture
+    foreach($remote in @(@{tag_name='v1.2.3';draft=$false;assets=@()},@{tag_name='v9.0.0';draft=$true;assets=@()})) {
+        $state.Remote=$remote
+        Assert-Throws {& $module {param($p)Get-AmithGitHubDraft $p 'Amith211/Example' 'v1.2.3'} $p} '*expected GitHub draft*'
+    }
+}
+
 # Do not leak scenario state into the parent suite.
 $state.DownloadMode='Empty';$state.FailVpkChannel='';$state.PartialVpk=$false;$state.ReflectReleases=$false

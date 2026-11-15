@@ -129,7 +129,15 @@ $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock
         $script:TestState.Calls.Add(@{File=$File;Arguments=@($Arguments);SensitiveValues=@($SensitiveValues)})
         if ($File -eq 'git') { if ($Arguments[0] -eq 'rev-parse') { return '0123456789012345678901234567890123456789' }; return }
         if ($File -eq 'gh') {
-            if ($Arguments[0] -eq 'api') { return ($script:TestState.Remote|ConvertTo-Json -Depth 20) }
+            if ($Arguments[0] -eq 'api') {
+                if ($Arguments[1] -like '*/releases/tags/*') { throw 'GitHub draft by-tag lookup returned HTTP 404' }
+                if ($Arguments[1] -notlike '*/releases/42') { throw 'Unexpected release API URL' }
+                return ($script:TestState.Remote|ConvertTo-Json -Depth 20)
+            }
+            if ($Arguments[1] -eq 'view') {
+                $repository=$Arguments[([array]::IndexOf($Arguments,'--repo')+1)]
+                return (@{apiUrl="https://api.github.com/repos/$repository/releases/42"}|ConvertTo-Json)
+            }
             if ($Arguments[1] -eq 'list') {
                 if($script:TestState.ReflectReleases){return (@(@{tagName=$script:TestState.Remote.tag_name;isDraft=$script:TestState.Remote.draft})|ConvertTo-Json -AsArray)}
                 return '[]'
@@ -512,7 +520,7 @@ try {
     Check 'GitHub creates a draft and uploads before publication' {
         $p=Read-Plan $script:built.PlanPath;$p.Release=@{GitHub=@{Enabled=$true;Repository='Amith211/Example';RequireCleanTree=$false}};$p.SourceCommit='0123456789012345678901234567890123456789'
         & $module {param($p)Write-AmithJson $p $p.PlanPath} $p
-        $state.Calls.Clear();Invoke-AmithBuildStage $p.PlanPath Release|Out-Null;$calls=@($state.Calls|Where-Object{$_.File -eq 'gh' -and $_.Arguments[0] -eq 'release'})
+        $state.Calls.Clear();Invoke-AmithBuildStage $p.PlanPath Release|Out-Null;$calls=@($state.Calls|Where-Object{$_.File -eq 'gh' -and $_.Arguments[0] -eq 'release' -and $_.Arguments[1] -ne 'view'})
         Assert-Equal @('list','create','upload','edit') @($calls|ForEach-Object{$_.Arguments[1]});Assert-True ($calls[1].Arguments -contains '--draft')
     }
     Check 'source-commit changes block GitHub release before uploading' {
