@@ -471,6 +471,7 @@ try {
     . (Join-Path $PSScriptRoot 'PackagingChecks.ps1')
     . (Join-Path $PSScriptRoot 'ConfigDiscoveryChecks.ps1')
     . (Join-Path $PSScriptRoot 'TestPolicyChecks.ps1')
+    . (Join-Path $PSScriptRoot 'SdkResolutionChecks.ps1')
     Check 'rebuilding invalidates previous artifact and release gates' {
         $p=Invoke-AmithBuildStage $script:built.PlanPath Build;Assert-Equal 0 $p.Artifacts.Count;Assert-True (-not $p.Stages.Contains('Pack'))
     }
@@ -549,7 +550,7 @@ if ($Integration) {
         }
     }
 }
-if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1') }
+if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkResolutionIntegrationChecks.ps1') }
 . (Join-Path $PSScriptRoot 'NuGetChecks.ps1')
 Write-Host "$script:passed checks passed. Test workspace: $testRoot"
 

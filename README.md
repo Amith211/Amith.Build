@@ -538,3 +538,23 @@ Consumer-owned workflows can use the same setup without the reusable workflow:
 ~~~
 
 The action supports Windows/Linux x64 and arm64; validation runs x64 on both operating systems. Existing .NET setup and NuGet credential configuration remain separate.
+
+## SDK requirements resolution
+
+Resolve-AmithSdkRequirements and scripts/Resolve-AmithSdk.ps1 provide metadata-only SDK preflight. They read Microsoft's release index and channel history. This preflight does not install SDKs, change PATH, select an SDK for a build, or change global.json. The existing workflow's dotnet-version input and existing build commands continue to work as before.
+
+~~~powershell
+Import-Module ./src/Amith.Build/Amith.Build.psd1
+Resolve-AmithSdkRequirements -RootPath ./ -SdkVersion 10 -AdditionalSdks 8.0.x
+./scripts/Resolve-AmithSdk.ps1 -RootPath ./ -TargetFrameworks netstandard2.0,net10.0 -OutputPath ./sdk-requirements.json
+~~~
+
+Selectors are auto (default), latest (latest supported stable SDK), a major such as 10, a channel such as 10.0 or 10.0.x, or an exact version such as 10.0.100. Explicit exact prerelease versions are allowed when present in Microsoft's metadata; a preview channel is never selected implicitly. AdditionalSdks accepts the same selectors except auto. Additional versions expand availability without changing the build request.
+
+Auto first discovers the nearest global.json from RootPath upward. An SDK policy there takes precedence over framework inference. Otherwise, pass the frameworks already evaluated by MSBuild: the highest modern target determines the SDK channel, including platform suffixes such as net10.0-windows. Successfully evaluated .NET Standard/.NET Framework-only targets fall back to the newest supported stable LTS SDK. Missing or unrecognised targets fail and request an explicit selection. This preflight does not scan project XML or infer whether a failed evaluation was a legacy project.
+
+The result records RequestedSdkVersion, SelectionSource, BootstrapSdkVersion, SupportedSdkVersions, AdditionalSdkVersions and a deduplicated InstallSdkVersions list. Supported SDKs come from stable channels in active/maintenance support, independently of the requested build SDK. End-of-life channels can still be explicitly requested or inferred from an old target.
+
+GlobalJson contains the discovered path and untouched SDK policy. When that policy governs auto selection, RequestedSdkVersion is empty: the native .NET host must choose the final SDK under that policy. An exact global.json baseline is included in the installation requirements, alongside supported SDKs and additional requests. RequiresGlobalJsonValidation explicitly marks policy-bearing results that still need native host validation; an explicit SDK request is not proof of compatibility with global.json. This command does not perform SDK installation, project evaluation/bootstrap, final selection or conflict enforcement. No global.json bypass is provided.
+
+The requirements output contains machine paths. Keep saved preflight results with local build metadata rather than committing them to a public repository. Microsoft's [release metadata](https://github.com/dotnet/core/tree/main/release-notes) supplies versions; the [.NET host's global.json rules](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json) remain authoritative for SDK policy.

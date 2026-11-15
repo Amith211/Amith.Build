@@ -5,7 +5,7 @@
     Author = 'Amith211'
     Description = 'Shared, staged .NET builds, packages and releases for local use and GitHub Actions.'
     PowerShellVersion = '7.4'
-    FunctionsToExport = @('New-AmithBuildPlan', 'Invoke-AmithBuild', 'Invoke-AmithBuildStage')
+    FunctionsToExport = @('New-AmithBuildPlan', 'Invoke-AmithBuild', 'Invoke-AmithBuildStage', 'Resolve-AmithSdkRequirements')
     CmdletsToExport = @()
     VariablesToExport = @()
     AliasesToExport = @()
