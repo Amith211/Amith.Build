@@ -10,6 +10,7 @@ on:
       - setup-nuget/**
       - setup-tools/**
       - setup-dotnet/**
+      - runner-diagnostics/**
       - .github/workflows/validate.yml
       - .github/workflows/build.yml
 permissions:
@@ -20,16 +21,22 @@ jobs:
       fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest]
+    timeout-minutes: 360
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - name: Register diagnostic post-hook integration check
+        uses: ./runner-diagnostics
+        with:
+          keep-runner-alive: 'true'
+          keep-runner-alive-minutes: '1'
       - uses: actions/setup-node@v6
         with:
           node-version: '24'
-      - name: Tool cache unit checks
-        run: node --test tests/ToolCacheChecks.cjs
+      - name: Node action unit and process checks
+        run: node --test tests/ToolCacheChecks.cjs tests/RunnerDiagnosticsChecks.cjs
       - name: Cold shared tool setup
         id: tools
         uses: ./setup-tools

@@ -96,6 +96,18 @@ on:
         description: Legacy single-selector alias for sdk-version; do not supply both.
         type: string
         default: ''
+      keep-runner-alive:
+        description: Keep the runner allocated for diagnostics at the end, including after failures.
+        type: boolean
+        default: false
+      keep-runner-alive-minutes:
+        description: Whole minutes (1-360), or -1 for all remaining budget.
+        type: number
+        default: 60
+      runner-timeout-margin-minutes:
+        description: Whole minutes reserved before the six-hour job limit (1-359).
+        type: number
+        default: 30
       release:
         type: boolean
         default: false
@@ -111,6 +123,7 @@ on:
         required: false
 jobs:
   build:
+    timeout-minutes: 360
     runs-on:
       group: ${{ inputs.runner-group }}
     concurrency:
@@ -122,6 +135,12 @@ jobs:
     permissions:
       contents: write
     steps:
+      - name: Register runner diagnostics
+        uses: Amith211/Amith.Build/runner-diagnostics@v0.1
+        with:
+          keep-runner-alive: ${{ inputs.keep-runner-alive }}
+          keep-runner-alive-minutes: ${{ inputs.keep-runner-alive-minutes }}
+          runner-timeout-margin-minutes: ${{ inputs.runner-timeout-margin-minutes }}
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
