@@ -6,6 +6,18 @@ on:
       version:
         required: true
         type: string
+      keep-runner-alive:
+        description: Keep the runner available after success or failure for diagnostics.
+        type: boolean
+        default: false
+      keep-runner-alive-minutes:
+        description: Minutes to hold (1-360), or -1 for remaining job budget.
+        type: number
+        default: 60
+      runner-timeout-margin-minutes:
+        description: Minutes reserved before the six-hour limit (1-359).
+        type: number
+        default: 30
 permissions:
   contents: write
 jobs:
@@ -16,6 +28,9 @@ jobs:
       config: amith.build.psd1
       runner-group: Amith-runners
       release: true
+      keep-runner-alive: ${{ inputs.keep-runner-alive }}
+      keep-runner-alive-minutes: ${{ inputs.keep-runner-alive-minutes }}
+      runner-timeout-margin-minutes: ${{ inputs.runner-timeout-margin-minutes }}
     secrets:
       NUGET_SOURCE_URL: ${{ secrets.NUGET_SOURCE_URL }}
       NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}

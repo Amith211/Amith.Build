@@ -1,0 +1,17 @@
+name: Register runner diagnostics
+description: Optionally keep the runner allocated after normal job steps, including failures, within a six-hour budget.
+inputs:
+  keep-runner-alive:
+    description: Enable the post-job diagnostic hold.
+    default: 'false'
+  keep-runner-alive-minutes:
+    description: Whole minutes (1-360), or -1 for all remaining time before the cleanup margin.
+    default: '60'
+  runner-timeout-margin-minutes:
+    description: Whole minutes reserved before the six-hour job limit (1-359).
+    default: '30'
+runs:
+  using: node24
+  main: main.cjs
+  post: post.cjs
+  post-if: always() && !cancelled()

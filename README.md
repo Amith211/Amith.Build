@@ -500,6 +500,35 @@ The workflow uses GitHub concurrency with queue: max and cancel-in-progress: fal
 
 Concurrency is scoped to the calling repository. Separate repositories targeting the same external feed/release repository, local commands and custom workflows using individual stages need their own coordination. If the caller also defines concurrency, use a different group from the shared job's amith-build-release-<owner/repository> group to avoid waiting on its own lock. See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
 
+### Diagnostic runner hold
+
+The shared workflow supports an optional post-job hold for inspecting a self-hosted runner or Kubernetes runner pod. It is disabled by default. Enable it in the caller:
+
+~~~yaml
+with:
+  keep-runner-alive: true
+  keep-runner-alive-minutes: 60
+  runner-timeout-margin-minutes: 30
+~~~
+
+keep-runner-alive-minutes accepts whole minutes from 1 to 360, or -1 for the maximum remaining budget. The common job limit is six hours (360 minutes) on self-hosted and GitHub-hosted runners. runner-timeout-margin-minutes reserves 30 minutes by default and accepts whole minutes from 1 to 359. The actual wait is capped at job registration time plus 360 minutes minus the margin, counting work already completed. For example, with a 30-minute margin and 40 minutes of work, -1 allows at most another 290 minutes. A normal 60-minute request waits only 60 minutes if that much budget remains. An exhausted budget skips the hold.
+
+Registration is the first shared-workflow step, before checkout or PowerShell/.NET setup. Its Node post-hook runs at the end, after normal steps and other registered post-action cleanup, even when a build step fails. Failed steps still stop the remaining ordinary steps; the hold does not turn a failed job into a successful one. Registration validates all duration inputs before work starts.
+
+The hook records wall time and OS uptime and caps its timer against both the remaining whole-job budget and monotonic elapsed time. Invalid clock state is handled conservatively. Cancel the workflow to stop an active hold; already-cancelled jobs skip it. The job remains active during a hold and continues to occupy its release-concurrency slot.
+
+This keeps the job allocated; it does not start SSH services or an interactive shell. Use your existing runner/pod administration tools to connect. Registration must have started successfully: runner loss, forced termination and hard job timeouts cannot be recovered by this hook.
+
+Consumer-owned workflows can register the same action before their other steps. Use a 360-minute job timeout to match the shared budget; a shorter job/step timeout can terminate the hold earlier:
+
+~~~yaml
+- uses: Amith211/Amith.Build/runner-diagnostics@v0.1
+  with:
+    keep-runner-alive: true
+    keep-runner-alive-minutes: -1
+    runner-timeout-margin-minutes: 30
+~~~
+
 ### Public tooling, private consumers
 
 The public `Amith211/Amith.Build` can be consumed by personal and organisation repositories, subject to their Actions policies. Consumer configuration, source and secrets remain in the calling repository; using public tooling does not publish them. The reusable workflow defaults to the existing self-hosted runner group; examples use `Amith-runners`. Amith.Build's own validation uses GitHub-hosted runners.
