@@ -492,6 +492,14 @@ The reusable workflow calls the matching `@v0.1` action for each stage. `@v0.1` 
 
 The reusable full-release workflow requests `contents: write` for GitHub release support. A NuGet-only consumer can use the composite action with `contents: read`. Supply `NUGET_SOURCE_URL`/`NUGET_API_KEY` for feed publishing and `RELEASE_TOKEN` when a custom GitHub token is needed. The built-in caller token is the default GitHub token. `vpk` is needed only when Installer is enabled for a project; project-specific Velopack tools are isolated rather than globally updated. The reusable workflow bootstraps PowerShell and GitHub CLI through the shared setup-tools action; `powershell-tag` can pin its release.
 
+### Release concurrency
+
+The shared workflow runs one release job at a time per calling repository, across versions, refs and caller workflows. It holds the queue for the whole build/package/release job so Velopack previous-release downloads and publication cannot overlap another shared release from that repository. New release runs wait; they do not cancel the running release or replace an already queued release.
+
+The workflow uses GitHub concurrency with queue: max and cancel-in-progress: false. GitHub allows up to 100 pending jobs per group; extra jobs are cancelled if that queue is full. Queue order follows when jobs start waiting, so dispatch order is not guaranteed. Build-only runs have a separate group per run/attempt and do not contend with release runs or other build-only runs.
+
+Concurrency is scoped to the calling repository. Separate repositories targeting the same external feed/release repository, local commands and custom workflows using individual stages need their own coordination. If the caller also defines concurrency, use a different group from the shared job's amith-build-release-<owner/repository> group to avoid waiting on its own lock. See [GitHub's concurrency documentation](https://docs.github.com/en/actions/how-tos/write-workflows/choose-when-workflows-run/control-workflow-concurrency).
+
 ### Public tooling, private consumers
 
 The public `Amith211/Amith.Build` can be consumed by personal and organisation repositories, subject to their Actions policies. Consumer configuration, source and secrets remain in the calling repository; using public tooling does not publish them. The reusable workflow defaults to the existing self-hosted runner group; examples use `Amith-runners`. Amith.Build's own validation uses GitHub-hosted runners.
