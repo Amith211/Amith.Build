@@ -73,6 +73,14 @@ on:
       powershell-tag:
         type: string
         default: ''
+      tool-cache-path:
+        description: 'Persistent tools root; empty uses /opt/hostedtoolcache on Linux and the runner cache on Windows.'
+        type: string
+        default: ''
+      gh-version:
+        description: 'GitHub CLI release version; empty selects latest stable.'
+        type: string
+        default: ''
       runner-group:
         type: string
         default: bcs-runners
@@ -102,13 +110,30 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
-      - name: Set up PowerShell
-        uses: milliewalky/setup-pwsh@v1
+      - name: Ensure Linux compression tools
+        if: runner.os == 'Linux'
+        shell: bash
+        run: |
+          if ! command -v zstd >/dev/null 2>&1; then
+            if [ "$(id -u)" -eq 0 ]; then
+              apt-get update && apt-get install -y zstd
+            else
+              sudo apt-get update && sudo apt-get install -y zstd
+            fi
+          fi
+          zstd --version
+      - name: Set up shared build tools
+        uses: Amith211/Amith.Build/setup-tools@v0.1
         with:
-          tag: ${{ inputs.powershell-tag }}
+          powershell-tag: ${{ inputs.powershell-tag }}
+          gh-version: ${{ inputs.gh-version }}
+          tool-cache-path: ${{ inputs.tool-cache-path || (runner.os == 'Linux' && '/opt/hostedtoolcache' || '') }}
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: ${{ inputs.dotnet-version }}
+      - name: Verify .NET SDK
+        shell: pwsh
+        run: dotnet --version
       - name: Configure NuGet restore feeds
         uses: Amith211/Amith.Build/setup-nuget@v0.1
         env:

@@ -7,6 +7,8 @@ Import-Module (Join-Path $PSScriptRoot '../src/Amith.Build/Amith.Build.psd1') -F
 $module = Get-Module Amith.Build
 $testRoot = Join-Path ([IO.Path]::GetTempPath()) ('Amith.Build.Tests-' + [Guid]::NewGuid().ToString('N'))
 [void][IO.Directory]::CreateDirectory($testRoot)
+$originalToolCache = $env:AMITH_TOOL_CACHE
+$env:AMITH_TOOL_CACHE = Join-Path $testRoot 'tool cache'
 $script:passed = 0
 function Check([string]$Name, [scriptblock]$Body) { & $Body; $script:passed++; Write-Host "PASS $Name" }
 function Assert-True($Value) { if (-not $Value) { throw 'Assertion failed' } }
@@ -48,7 +50,7 @@ Set-Content -LiteralPath (Join-Path $fixture 'global.json') -Value '{"test":{"ru
 $configPath=Join-Path $fixture 'amith.build.psd1'
 Set-Content -LiteralPath $configPath -Value '@{ Solution = ''Fixture.sln''; Runtimes = @(''win-x64'',''linux-x64''); Exclude = @(''samples/**''); Defaults = @{ ArchiveFormats = @(''zip'') }; Overrides = @(@{Match=''src/Lib/*'';Pack=$true}) }'
 $originalGhToken=$env:GH_TOKEN; $env:GH_TOKEN='not-a-real-test-token'
-$state = @{DownloadMode='Empty';SeedPackId='Amith.Client';FailVpkChannel='';PartialVpk=$false;ReflectReleases=$false;Remote=@{tag_name='v1.2.3';draft=$true;assets=@()};AssetId=0;Root=$fixture;Calls=[Collections.Generic.List[object]]::new();FailTest=$false;FailBuild=$false;FailPush=$false;FailUpload=$false}
+$state = @{DownloadMode='Empty';SeedPackId='Amith.Client';FailVpkChannel='';PartialVpk=$false;ReflectReleases=$false;FailToolInstall=$false;Remote=@{tag_name='v1.2.3';draft=$true;assets=@()};AssetId=0;Root=$fixture;Calls=[Collections.Generic.List[object]]::new();FailTest=$false;FailBuild=$false;FailPush=$false;FailUpload=$false}
 $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock }
 & $module {
     param($State)
@@ -76,6 +78,7 @@ $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock
             if ($Arguments[1] -eq 'upload' -and $script:TestState.FailUpload) { throw 'simulated upload failure' }; return
         }
         if ([IO.Path]::GetFileNameWithoutExtension($File) -eq 'vpk') {
+            if ($Arguments -contains '--help') { return 'Velopack CLI 1.2.161' }
             $dir=$Arguments[([array]::IndexOf($Arguments,'--outputDir')+1)];[void][IO.Directory]::CreateDirectory($dir)
             $channel=$Arguments[([array]::IndexOf($Arguments,'--channel')+1)]
             if($Arguments -contains 'download') {
@@ -123,7 +126,7 @@ $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock
                 return (@{Properties=$properties}|ConvertTo-Json -Depth 5)
             }
             '--version' { return '10.0.401' }
-            tool { $dir=$Arguments[([array]::IndexOf($Arguments,'--tool-path')+1)];[void][IO.Directory]::CreateDirectory($dir);Set-Content -LiteralPath (Join-Path $dir $(if($IsWindows){'vpk.exe'}else{'vpk'})) -Value 'fake tool';return }
+            tool { $dir=$Arguments[([array]::IndexOf($Arguments,'--tool-path')+1)];[void][IO.Directory]::CreateDirectory($dir);Set-Content -LiteralPath (Join-Path $dir $(if($IsWindows){'vpk.exe'}else{'vpk'})) -Value 'fake tool';if($script:TestState.FailToolInstall){throw 'simulated tool install failure'};return }
             build { if($script:TestState.FailBuild){throw 'simulated build failure'};return }
             restore { return }; test { if($script:TestState.FailTest){throw 'simulated test failure'};return }
             nuget { if($script:TestState.FailPush){throw 'simulated feed failure'};return }
@@ -408,7 +411,7 @@ try {
         @($p.Projects|Where-Object Name -eq Desktop)[0].Velopack=@{Enabled=$true;PackId='Amith.Client';MainExe='Client.exe';ToolVersion='1.2.161';DownloadPrevious=$false}
         & $module {param($p)Write-AmithJson $p $p.PlanPath} $p
         $state.Calls.Clear();$p=Invoke-AmithBuildStage $p.PlanPath Installer
-        $call=@($state.Calls|Where-Object{[IO.Path]::GetFileNameWithoutExtension($_.File) -eq 'vpk'})[0]
+        $call=@($state.Calls|Where-Object{[IO.Path]::GetFileNameWithoutExtension($_.File) -eq 'vpk' -and $_.Arguments -contains 'pack'})[0]
         Assert-Equal '[win]' $call.Arguments[0]
         Assert-Equal 'win-x64' $call.Arguments[([array]::IndexOf($call.Arguments,'--runtime')+1)]
         Assert-Equal 3 @($p.Artifacts|Where-Object Kind -eq Installer).Count
@@ -464,6 +467,7 @@ try {
         Assert-Equal 0 @($state.Calls|Where-Object{$_.File -eq 'gh' -and $_.Arguments[1] -eq 'edit'}).Count
     }
     . (Join-Path $PSScriptRoot 'VelopackChecks.ps1')
+    . (Join-Path $PSScriptRoot 'ToolCacheChecks.ps1')
     . (Join-Path $PSScriptRoot 'PackagingChecks.ps1')
     . (Join-Path $PSScriptRoot 'ConfigDiscoveryChecks.ps1')
     . (Join-Path $PSScriptRoot 'TestPolicyChecks.ps1')
@@ -474,7 +478,7 @@ try {
         $p=New-FixturePlan;Assert-Throws {& $module {param($p)Assert-AmithOutputPath $p (Join-Path $p.OutputRoot '../escape.zip')} $p} '*escaped*'
     }
 }
-finally { & $module {param($Original) Set-Item Function:script:Invoke-AmithNative -Value $Original} $originalNative; $env:GH_TOKEN=$originalGhToken }
+finally { & $module {param($Original) Set-Item Function:script:Invoke-AmithNative -Value $Original} $originalNative; $env:GH_TOKEN=$originalGhToken; $env:AMITH_TOOL_CACHE=$originalToolCache }
 Check 'real ZIP and tar archives honor both naming modes and preserve old saved-plan naming' {
     foreach($mode in @('unversioned','versioned','legacy')) {
         $root=Join-Path $testRoot ('archive-'+$mode)
@@ -545,7 +549,7 @@ if ($Integration) {
         }
     }
 }
-if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1') }
+if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1') }
 . (Join-Path $PSScriptRoot 'NuGetChecks.ps1')
 Write-Host "$script:passed checks passed. Test workspace: $testRoot"
 

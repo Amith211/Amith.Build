@@ -433,7 +433,7 @@ Velopack = @{
 }
 ```
 
-Installer first uses `Velopack.ToolVersion`, or infers the version from the restored Velopack dependency in `project.assets.json` (including transitive dependencies). It installs that version into this run's isolated tools directory without changing global tools. If no version can be inferred, an already-installed `vpk` is used; otherwise the stage explains how to configure one. Installer calls the explicit `[win]`/`[linux]` directive with the planned RID; it never assumes the runner OS is the package OS. Linux AppImage packaging and code signing may require additional external tools/arguments. Resolve asset paths in extra arguments relative to the consumer root.
+Installer first uses `Velopack.ToolVersion`, or infers the version from the restored Velopack dependency in `project.assets.json` (including transitive dependencies). It installs that version into a persistent cache separated by version, OS and architecture without changing global tools. If no version can be inferred, an already-installed `vpk` is used; otherwise the stage explains how to configure one. Installer calls the explicit `[win]`/`[linux]` directive with the planned RID; it never assumes the runner OS is the package OS. Linux AppImage packaging and code signing may require additional external tools/arguments. Resolve asset paths in extra arguments relative to the consumer root.
 
 For delta generation, `DownloadPrevious` defaults to true and uses `vpk download github` before packaging. A successful empty download (no previous release, channel feed or applicable full package) continues as a first release. Public repositories can download anonymously; set `GH_TOKEN` (or `TokenEnvironment`) for private repositories. Authentication, network and malformed-package failures stop the stage. Incomplete downloads are rejected even if the tool exits successfully after a checksum error. Downloaded packages are validated against the configured application ID and copied into a fresh packaging directory as delta bases; only files listed by the new `assets.<channel>.json` build manifest are recorded as generated package artifacts. Both failed attempts and previous bases are retained locally, with each attempt isolated in its own directory.
 
@@ -490,7 +490,7 @@ with:
 
 The reusable workflow calls the matching `@v0.1` action for each stage. `@v0.1` is the maintained 0.1 development release line; incompatible API/configuration changes after its initial release belong in a new minor line such as `@v0.2`. Both references must exist before consumption. For immutable builds, use a fully pinned caller/action arrangement instead of assuming a pinned workflow freezes its internal moving action reference. Use the composite directly with a pinned SHA when that is required.
 
-The reusable full-release workflow requests `contents: write` for GitHub release support. A NuGet-only consumer can use the composite action with `contents: read`. Supply `NUGET_SOURCE_URL`/`NUGET_API_KEY` for feed publishing and `RELEASE_TOKEN` when a custom GitHub token is needed. The built-in caller token is the default GitHub token. `vpk` is needed only when Installer is enabled for a project; project-specific Velopack tools are isolated rather than globally updated. The reusable workflow also bootstraps PowerShell using a PowerShell setup action; `powershell-tag` can pin its release.
+The reusable full-release workflow requests `contents: write` for GitHub release support. A NuGet-only consumer can use the composite action with `contents: read`. Supply `NUGET_SOURCE_URL`/`NUGET_API_KEY` for feed publishing and `RELEASE_TOKEN` when a custom GitHub token is needed. The built-in caller token is the default GitHub token. `vpk` is needed only when Installer is enabled for a project; project-specific Velopack tools are isolated rather than globally updated. The reusable workflow bootstraps PowerShell and GitHub CLI through the shared setup-tools action; `powershell-tag` can pin its release.
 
 ### Public tooling, private consumers
 
@@ -514,3 +514,27 @@ The checks need no Pester dependency. Native failures, discovery/overrides, proj
 No existing consumer workflow is automatically migrated. Validate each project's plan/configuration and its platform-specific packaging before adopting the central release pipeline.
 
 Library builds and NuGet packing explicitly use a portable target rather than inheriting application publish RIDs. Tests are restored, built and run for the current host runtime, independently of the Windows/Linux publish runtime list. Restore uses the selected configuration and version too. Build allows incremental restore checks because another project or framework can replace a shared dependency's assets file with a different set of targets between stages. Test and Pack also refresh matching assets before using their existing binaries, including when earlier stages restored a different framework. This avoids stale-assets failures without deleting source outputs.
+
+## Shared tool setup and cache
+
+The reusable workflow prepares PowerShell and GitHub CLI before running any PowerShell steps. It uses the runner's Node runtime to bootstrap PowerShell, so PowerShell 7 need not already be installed. Empty powershell-tag and gh-version inputs select each tool's latest stable release; exact versions can be supplied to pin them. Downloads come from the official projects and are checked against their SHA256 release metadata/checksums.
+
+The tool-cache-path input overrides the cache location. The shared workflow defaults to /opt/hostedtoolcache on Linux. When used independently, the setup action uses AMITH_TOOL_CACHE, then RUNNER_TOOL_CACHE, with /opt/hostedtoolcache as the Linux fallback. Mount your persistent Kubernetes volume at that path, or point tool-cache-path at its mount. The setup action exports AMITH_TOOL_CACHE for later stages. Local PowerShell builds use that variable or RUNNER_TOOL_CACHE when set, otherwise the user's ~/.cache/amith-build/tools directory.
+
+Installations are separated by tool, version, OS and architecture. Cache hits still restore PATH and validate the executable. Locks prevent concurrent writers from installing over each other; incomplete installations have no ready marker and are replaced on the next attempt. An interrupted Node installation may leave a lock directory; after confirming no installer is running, remove that specific lock and retry. Cached tools are not uploaded with release artifacts. Keep the cache on a trusted runner volume.
+
+Velopack keeps the existing selection order: explicit ToolVersion, restored Velopack dependency version, then an installed vpk if no version can be inferred. Selected versions use the persistent cache instead of the build output directory. Tools needing an unavailable .NET runtime fail with the native tool error; the .NET installation policy is unchanged.
+
+Linux shared builds also check/install zstd using apt-get (with sudo for non-root runners). This requires an Ubuntu/Debian-compatible runner and installation privileges when zstd is missing. For v0.1, legacy PATH discovery is retained across the existing tool roots, tolerating missing directories and paths containing spaces. Selected PowerShell/GitHub CLI installations take precedence.
+
+Consumer-owned workflows can use the same setup without the reusable workflow:
+
+~~~yaml
+- uses: Amith211/Amith.Build/setup-tools@v0.1
+  with:
+    tool-cache-path: /opt/hostedtoolcache
+    # powershell-tag: v7.7.0
+    # gh-version: v2.104.0
+~~~
+
+The action supports Windows/Linux x64 and arm64; validation runs x64 on both operating systems. Existing .NET setup and NuGet credential configuration remain separate.
