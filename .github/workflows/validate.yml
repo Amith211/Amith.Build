@@ -8,7 +8,9 @@ on:
       - tests/**
       - action.yml
       - setup-nuget/**
+      - setup-tools/**
       - .github/workflows/validate.yml
+      - .github/workflows/build.yml
 permissions:
   contents: read
 jobs:
@@ -22,6 +24,26 @@ jobs:
       - uses: actions/checkout@v7
         with:
           persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+      - name: Tool cache unit checks
+        run: node --test tests/ToolCacheChecks.cjs
+      - name: Cold shared tool setup
+        id: tools
+        uses: ./setup-tools
+        with:
+          tool-cache-path: ${{ runner.temp }}/amith-tools-test
+      - name: Cached shared tool setup
+        uses: ./setup-tools
+        with:
+          tool-cache-path: ${{ runner.temp }}/amith-tools-test
+      - name: Verify tool resolution
+        shell: pwsh
+        run: |
+          pwsh --version
+          gh --version
+          if ($env:AMITH_TOOL_CACHE -ne '${{ steps.tools.outputs.cache-root }}') { throw 'Tool cache environment was not restored.' }
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'

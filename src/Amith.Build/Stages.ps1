@@ -208,16 +208,7 @@ function Get-AmithVelopackTool {
     }
     if ($version) {
         Assert-AmithVersion $version
-        $directory = Assert-AmithOutputPath $Plan (Join-Path $Plan.OutputRoot "tools/vpk/$version")
-        $executable = Join-Path $directory $(if ($IsWindows) { 'vpk.exe' } else { 'vpk' })
-        if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) {
-            $arguments = @('tool','install','vpk','--version',$version,'--tool-path',$directory)
-            $sdk = (@(Invoke-AmithNative dotnet @('--version') $Plan.Root -Capture) -join '').Trim()
-            if ([int]($sdk -split '\.')[0] -ge 9) { $arguments += '--allow-roll-forward' }
-            Invoke-AmithNative dotnet $arguments $Plan.Root
-        }
-        if (-not (Test-Path -LiteralPath $executable -PathType Leaf)) { throw 'The selected vpk tool was not installed successfully.' }
-        return $executable
+        return Install-AmithCachedVelopack $version $Plan
     }
     $installed = Get-Command vpk -CommandType Application -ErrorAction SilentlyContinue | Select-Object -First 1
     if ($installed) { return $installed.Source }

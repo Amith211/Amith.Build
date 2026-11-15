@@ -1,0 +1,21 @@
+name: Set up shared build tools
+description: Bootstrap PowerShell and GitHub CLI using a persistent versioned tool cache.
+inputs:
+  powershell-tag:
+    description: PowerShell release tag; empty selects the latest stable release.
+    default: ''
+  gh-version:
+    description: GitHub CLI release version; empty selects the latest stable release.
+    default: ''
+  tool-cache-path:
+    description: Persistent tool cache root; empty uses RUNNER_TOOL_CACHE or the platform default.
+    default: ''
+  token:
+    description: Token used only for GitHub release metadata requests.
+    default: ${{ github.token }}
+outputs:
+  cache-root:
+    description: Resolved persistent cache root, also exported as AMITH_TOOL_CACHE.
+runs:
+  using: node24
+  main: index.cjs
