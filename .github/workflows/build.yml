@@ -5,6 +5,10 @@ on:
       version:
         type: string
         required: true
+      source-ref:
+        description: 'Optional source branch, tag or commit to build; empty checks out the calling workflow commit.'
+        type: string
+        default: ''
       config:
         type: string
         default: ''
@@ -144,13 +148,14 @@ jobs:
       contents: write
     steps:
       - name: Register runner diagnostics
-        uses: Amith211/Amith.Build/runner-diagnostics@v0.1.6
+        uses: Amith211/Amith.Build/runner-diagnostics@v0.1.7
         with:
           keep-runner-alive: ${{ inputs.keep-runner-alive }}
           keep-runner-alive-minutes: ${{ inputs.keep-runner-alive-minutes }}
           runner-timeout-margin-minutes: ${{ inputs.runner-timeout-margin-minutes }}
       - uses: actions/checkout@v7
         with:
+          ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
       - name: Ensure Linux compression tools
         if: runner.os == 'Linux'
@@ -165,7 +170,7 @@ jobs:
           fi
           zstd --version
       - name: Set up shared build tools
-        uses: Amith211/Amith.Build/setup-tools@v0.1.6
+        uses: Amith211/Amith.Build/setup-tools@v0.1.7
         with:
           powershell-tag: ${{ inputs.powershell-tag }}
           gh-version: ${{ inputs.gh-version }}
@@ -192,17 +197,17 @@ jobs:
             throw 'artifact-retention-days must be a whole number between 1 and 400, within the repository/organisation retention limit.'
           }
       - name: Bootstrap .NET SDKs
-        uses: Amith211/Amith.Build/setup-dotnet@v0.1.6
+        uses: Amith211/Amith.Build/setup-dotnet@v0.1.7
         with:
           sdk-version: ${{ inputs.sdk-version || inputs.dotnet-version || 'auto' }}
           additional-sdks: ${{ inputs.additional-sdks }}
       - name: Configure NuGet restore feeds
-        uses: Amith211/Amith.Build/setup-nuget@v0.1.6
+        uses: Amith211/Amith.Build/setup-nuget@v0.1.7
         env:
           AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
       - name: Plan
         id: plan
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Plan
           config: ${{ inputs.config }}
@@ -228,32 +233,32 @@ jobs:
           include-development-settings: ${{ inputs.include-development-settings }}
           package-excludes: ${{ inputs.package-excludes }}
       - name: Restore
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Restore
       - name: Build
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Build
       - name: Test
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Test
       - name: Pack NuGet libraries
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Pack
       - name: Publish applications
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Publish
       - name: Archive applications
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Archive
       - name: Package configured installers
         id: installer
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         with:
@@ -261,7 +266,7 @@ jobs:
       - name: Release
         id: release
         if: inputs.release
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         env:
           NUGET_SOURCE_URL: ${{ secrets.NUGET_SOURCE_URL }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -271,7 +276,7 @@ jobs:
       - name: Select recorded artifacts for retention
         id: retain
         if: ${{ !cancelled() && steps.retention-policy.outcome == 'success' && steps.installer.outcome == 'success' && (inputs.artifact-retention == 'always' || (inputs.artifact-retention == 'auto' && (!inputs.release || steps.release.outcome == 'failure'))) }}
-        uses: Amith211/Amith.Build@v0.1.6
+        uses: Amith211/Amith.Build@v0.1.7
         with:
           stage: Retain
       - name: Retain packaged artifacts
