@@ -7,6 +7,7 @@ param([string] $ConfigPath, [string] $Solution, [string] $RootPath,
           [switch] $SelfContained, [switch] $SingleFile, [switch] $StandaloneSingleFile,
           [switch] $VersionedArchives, [switch] $UnversionedArchives,
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
+      [switch] $NoTests, [switch] $SkipTests,
       [string] $PlanPath, [string[]] $Stages, [switch] $PlanOnly)
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Amith.Build/Amith.Build.psd1') -Force

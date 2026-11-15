@@ -104,6 +104,7 @@ function New-AmithBuildPlan {
           [switch] $SelfContained, [switch] $SingleFile, [switch] $StandaloneSingleFile,
           [switch] $VersionedArchives, [switch] $UnversionedArchives,
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
+          [switch] $NoTests, [switch] $SkipTests,
           [string] $PlanPath = '.amith-build/plan.json')
     $deploymentOverrides = Get-AmithDeploymentOverrides $PSBoundParameters
     $archiveOverrides = Get-AmithArchiveOverrides $PSBoundParameters
@@ -134,6 +135,12 @@ function New-AmithBuildPlan {
         elseif (-not $automaticConfig) { $root = $configDirectory }
         Write-Host "Configuration: $ConfigPath"
     }
+    $testPolicy=@{}
+    foreach ($option in @('NoTests','SkipTests')) {
+        $testPolicy[$option]=ConvertTo-AmithBoolean (Get-AmithValue $config $option $false)
+        if ($PSBoundParameters.ContainsKey($option)) { $testPolicy[$option]=[bool]$PSBoundParameters[$option] }
+    }
+    $testPolicy=Get-AmithTestPolicy @{TestPolicy=$testPolicy}
     $explicitVersion = -not [string]::IsNullOrWhiteSpace($Version)
     if (-not $explicitVersion) { $Version = [string](Get-AmithValue $config 'Version' '0.0.0-local'); $explicitVersion = $config.ContainsKey('Version') }
     Assert-AmithVersion $Version
@@ -199,6 +206,7 @@ function New-AmithBuildPlan {
         $settings.PackageExcludes = @(Get-AmithValue $settings 'PackageExcludes' @()) + $PackageExcludes
         $planned += Get-AmithProjectPlan $path $settings $root $configuration $Runtimes $Version $deploymentOverrides
     }
+    Assert-AmithNoTestsDeclaration $planned $testPolicy
     if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
     $duplicates = @($planned | Group-Object Name | Where-Object Count -gt 1)
     if ($duplicates.Count) { throw 'Duplicate artifact names; supply unique Name overrides for those projects.' }
@@ -210,11 +218,13 @@ function New-AmithBuildPlan {
     $plan = @{
         SchemaVersion = $script:AmithPlanSchemaVersion; Root = $root; Solution = $Solution; Version = $Version; ExplicitVersion = $explicitVersion; SourceCommit = Get-AmithSourceCommit $root
         Configuration = $configuration; RunId = $runId; OutputRoot = $outputRoot; OutputBase = $outputBase; Projects = @($planned)
+        TestPolicy = $testPolicy
         Artifacts = @(); Stages = @{}; Release = Get-AmithValue $config 'Release' @{}
         PlanPath = Resolve-AmithPath $PlanPath $root
     }
     Write-AmithJson $plan $plan.PlanPath
     Write-Host "Build plan: $($plan.PlanPath)"
+    Write-Host ("Test policy: " + $(if ($testPolicy.NoTests) {'NoTests'} elseif ($testPolicy.SkipTests) {'SkipTests'} else {'Required'}))
     foreach ($project in $planned) { Write-Host ("  {0}: {1} [{2}]{3}" -f $project.Name, $project.Kind, (($project.Targets | ForEach-Object Runtime) -join ', '), $(if ($project.Pack) { ' Pack=true' } else { '' })) }
     return $plan
 }

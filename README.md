@@ -284,11 +284,48 @@ The optional `Retain` stage prepares `RetainedRoot` containing only recorded Arc
 
 Add `.amith-build/`, `artifacts/` and, if used, `.amith-tools/` to the consuming repository's `.gitignore`.
 
+## Test policy
+
+The default Test stage requires at least one selected, host-compatible test target to complete successfully. No test projects, or no targets runnable on the current host, fails with guidance instead of silently allowing release.
+
+| CLI switch / top-level configuration | Behaviour |
+| --- | --- |
+| Neither | Run eligible tests; fail when none can run. |
+| `-NoTests` / `NoTests = $true` | Declare that the selected plan intentionally has no test projects. Planning fails if any selected project is classified as Test, including host-incompatible tests. |
+| `-SkipTests` / `SkipTests = $true` | Explicitly bypass execution, whether or not test projects exist. Selected test projects remain normal restore/build roots when host-compatible. |
+
+The two choices are mutually exclusive. CLI switches override configuration, including explicit `:$false`. Supply them when creating the plan; subsequent stages reuse its saved `TestPolicy`. A test-free plan can still be inspected with `-PlanOnly` without declaring a bypass, but its Test stage fails until the policy is explicitly chosen in a fresh plan.
+
+```powershell
+# Intentional test-free solution.
+Invoke-AmithBuild -Version 1.2.3 -NoTests
+
+# Explicitly bypass execution for this build.
+Invoke-AmithBuild -Version 1.2.3 -SkipTests
+
+# Re-enable normal testing when configuration specifies SkipTests.
+Invoke-AmithBuild -Version 1.2.3 -SkipTests:$false
+```
+
+GitHub Plan inputs are `no-tests` and `skip-tests`: optional strings, empty to preserve configuration and `'true'`/`'false'` to override it. The reusable workflow exposes both:
+
+```yaml
+with:
+  version: 1.2.3
+  no-tests: 'true'
+```
+
+The Test stage must still run for an intentional bypass. It records `TestResults.Disposition` as `NoTests` or `Skipped`, records skipped project names where applicable, and prints a warning. Normal completion records `Executed` and the number of successfully invoked targets. Release requires a successful Test stage plus either an executed target or a matching recorded intentional bypass; changing a flag alone does not satisfy that gate. Releases with a bypass print that decision explicitly. Rebuilds invalidate previous results, and rerunning Test invalidates the previous release gate.
+
+Requiring a runnable target is now the default. The earlier `Release.RequireTestExecution` opt-in is no longer necessary; setting it false does not relax this policy. Explicit `NoTests`/`SkipTests` choices govern intentional bypasses, including when that older setting is true. Saved plans without a test policy default to required testing; regenerate plans after updating unreleased tooling.
+
+This checks successful test-target invocation, not individual test-case counts. A runner reporting success with zero cases remains acceptable. If only Windows tests exist on a Linux runner, use a compatible runner or explicitly skip execution; `NoTests` is not a substitute for a platform mismatch.
+
 ## Linux hosts and Windows outputs
 
 A `runners` group can run the tooling on Linux with PowerShell 7.4+ and the required SDKs installed. WPF builds use `EnableWindowsTargeting`; this does not enable running Windows applications/COM on Linux. COM-reference resolution, native compilers and other platform-specific MSBuild tasks may still require a Windows build host. The tool does not switch the library target framework merely because the build host is Linux.
 
-Tests run only for host-compatible target frameworks and `TestPlatforms`. Windows-only test targets are reported as skipped on Linux. `TestResults` records executed targets and skipped projects. Set `Release.RequireTestExecution = $true` to reject release when no tests could run. For tests with a portable TFM but Windows-specific assumptions, supply `TestPlatforms = @('Windows')` or fix/split those tests. A successful cross-build is not a platform-specific runtime test.
+Tests run only for host-compatible target frameworks and `TestPlatforms`. Windows-only test targets are reported as skipped on Linux. `TestResults` records executed targets and skipped projects. The Test stage fails if no target can run unless an explicit test-policy bypass is recorded. For tests with a portable TFM but Windows-specific assumptions, supply `TestPlatforms = @('Windows')` or fix/split those tests. A successful cross-build is not a platform-specific runtime test.
 
 MTP and VSTest invocation are selected from the repository's `global.json` test runner setting. Test projects need their normal test SDK/adapter dependencies. The scripts do not install them or alter their target frameworks.
 
@@ -355,7 +392,6 @@ Release = @{
         SourceEnvironment = 'NUGET_SOURCE_URL'
         ApiKeyEnvironment = 'NUGET_API_KEY'
     }
-    RequireTestExecution = $true
 }
 ```
 

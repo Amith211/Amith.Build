@@ -32,6 +32,14 @@ on:
       no-pack:
         type: boolean
         default: false
+      no-tests:
+        description: 'Optional true/false declaration of no selected test projects; empty preserves configuration.'
+        type: string
+        default: ''
+      skip-tests:
+        description: 'Optional true/false explicit test execution bypass; empty preserves configuration.'
+        type: string
+        default: ''
       self-contained:
         description: 'Optional true/false override; empty preserves project configuration/defaults.'
         type: string
@@ -120,6 +128,8 @@ jobs:
           exclude-pack-projects: ${{ inputs.exclude-pack-projects }}
           pack-all-libraries: ${{ inputs.pack-all-libraries }}
           no-pack: ${{ inputs.no-pack }}
+          no-tests: ${{ inputs.no-tests }}
+          skip-tests: ${{ inputs.skip-tests }}
           self-contained: ${{ inputs.self-contained }}
           single-file: ${{ inputs.single-file }}
           standalone-single-file: ${{ inputs.standalone-single-file }}

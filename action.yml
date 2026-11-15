@@ -37,6 +37,12 @@ inputs:
   no-pack:
     description: Disable NuGet package creation for this plan.
     default: 'false'
+  no-tests:
+    description: Optional true/false declaration of no selected test projects (Plan only).
+    default: ''
+  skip-tests:
+    description: Optional true/false explicit test execution bypass (Plan only).
+    default: ''
   self-contained:
     description: Optional true/false application publish override; empty preserves configuration/defaults (Plan only).
     default: ''
@@ -92,6 +98,8 @@ runs:
         AMITH_PACK_ONLY_PROJECTS: ${{ inputs.pack-only-projects }}
         AMITH_EXCLUDE_PACK_PROJECTS: ${{ inputs.exclude-pack-projects }}
         AMITH_PACK_ALL_LIBRARIES: ${{ inputs.pack-all-libraries }}
+        AMITH_NO_TESTS: ${{ inputs.no-tests }}
+        AMITH_SKIP_TESTS: ${{ inputs.skip-tests }}
         AMITH_NO_PACK: ${{ inputs.no-pack }}
         AMITH_SELF_CONTAINED: ${{ inputs.self-contained }}
         AMITH_SINGLE_FILE: ${{ inputs.single-file }}
@@ -122,6 +130,8 @@ runs:
           }
           $arguments.PackAllLibraries = [bool]::Parse($env:AMITH_PACK_ALL_LIBRARIES)
           $arguments.NoPack = [bool]::Parse($env:AMITH_NO_PACK)
+          if ($env:AMITH_NO_TESTS) { $arguments.NoTests = [bool]::Parse($env:AMITH_NO_TESTS) }
+          if ($env:AMITH_SKIP_TESTS) { $arguments.SkipTests = [bool]::Parse($env:AMITH_SKIP_TESTS) }
           if ($env:AMITH_SELF_CONTAINED) { $arguments.SelfContained = [bool]::Parse($env:AMITH_SELF_CONTAINED) }
           if ($env:AMITH_SINGLE_FILE) { $arguments.SingleFile = [bool]::Parse($env:AMITH_SINGLE_FILE) }
           if ([bool]::Parse($env:AMITH_STANDALONE_SINGLE_FILE)) { $arguments.StandaloneSingleFile = $true }
@@ -133,9 +143,10 @@ runs:
         }
         elseif ($env:AMITH_PACK_PROJECTS -or $env:AMITH_PACK_ONLY_PROJECTS -or $env:AMITH_EXCLUDE_PACK_PROJECTS -or
                 [bool]::Parse($env:AMITH_PACK_ALL_LIBRARIES) -or [bool]::Parse($env:AMITH_NO_PACK) -or
+                $env:AMITH_NO_TESTS -or $env:AMITH_SKIP_TESTS -or
                 $env:AMITH_SELF_CONTAINED -or $env:AMITH_SINGLE_FILE -or [bool]::Parse($env:AMITH_STANDALONE_SINGLE_FILE) -or
                 $env:AMITH_INCLUDE_SYMBOLS -or $env:AMITH_INCLUDE_DEVELOPMENT_SETTINGS -or $env:AMITH_PACKAGE_EXCLUDES -or
                 $env:AMITH_VERSIONED_ARCHIVES -or [bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) {
-          throw 'Packaging and deployment inputs must be supplied to the Plan stage; later stages reuse its selections.'
+          throw 'Packaging, deployment and test-policy inputs must be supplied to the Plan stage; later stages reuse its selections.'
         }
         & (Join-Path $env:AMITH_ACTION_ROOT 'scripts/Invoke-AmithBuild.ps1') @arguments
