@@ -527,6 +527,22 @@ try {
         try {Assert-Throws {Invoke-AmithBuildStage $p.PlanPath Release} '*simulated upload failure*'} finally {$state.FailUpload=$false}
         Assert-Equal 0 @($state.Calls|Where-Object{$_.File -eq 'gh' -and $_.Arguments[1] -eq 'edit'}).Count
     }
+    Check 'retention after release failure preserves verified packages and the failed release state' {
+        $p=Read-Plan $script:built.PlanPath
+        $p.Release=@{GitHub=@{Enabled=$true;Repository='Amith211/Example';RequireCleanTree=$false}}
+        $p.SourceCommit='0123456789012345678901234567890123456789'
+        & $module {param($p)Write-AmithJson $p $p.PlanPath} $p
+        $state.FailUpload=$true
+        try{Assert-Throws {Invoke-AmithBuildStage $p.PlanPath Release} '*simulated upload failure*'}
+        finally{$state.FailUpload=$false}
+        $p=Invoke-AmithBuildStage $p.PlanPath Retain
+        Assert-Equal Failed $p.Stages.Release.Status
+        Assert-Equal Succeeded $p.Stages.Retain.Status
+        Assert-True (Test-Path -LiteralPath $p.RetainedRoot -PathType Container)
+        $selected=@($p.Artifacts|Where-Object Kind -in Archive,Installer,NuGet,Symbols)
+        Assert-True ($selected.Count -gt 0)
+        Assert-Equal $selected.Count @(Get-ChildItem -LiteralPath $p.RetainedRoot -Recurse -File).Count
+    }
     . (Join-Path $PSScriptRoot 'VelopackChecks.ps1')
     . (Join-Path $PSScriptRoot 'ToolCacheChecks.ps1')
     . (Join-Path $PSScriptRoot 'PackagingChecks.ps1')
