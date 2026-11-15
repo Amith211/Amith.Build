@@ -113,6 +113,12 @@ jobs:
   build:
     runs-on:
       group: ${{ inputs.runner-group }}
+    concurrency:
+      # All release versions/refs share one consumer-repository queue.
+      # Build-only runs have their own group and never hold the release queue.
+      group: ${{ inputs.release && format('amith-build-release-{0}', github.repository) || format('amith-build-check-{0}-{1}-{2}', github.repository, github.run_id, github.run_attempt) }}
+      cancel-in-progress: false
+      queue: max
     permissions:
       contents: write
     steps:
