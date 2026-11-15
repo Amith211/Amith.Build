@@ -1,3 +1,5 @@
+$script:AmithDotnetPath = ''
+$script:AmithSdkWorkingDirectory = ''
 # Keep this identifier fixed throughout unreleased development, even when the
 # format changes incompatibly. Reconsider increments only after the first alpha
 # release. Schema identifiers are strings and independent of module/action tags.
@@ -56,6 +58,10 @@ function Test-AmithPattern {
 
 function Invoke-AmithNative {
     param([string] $File, [string[]] $Arguments = @(), [string] $WorkingDirectory, [switch] $Capture, [string[]] $SensitiveValues = @())
+    if ($File -eq 'dotnet' -and $script:AmithDotnetPath) {
+        $File = $script:AmithDotnetPath
+        if (-not $WorkingDirectory) { $WorkingDirectory = $script:AmithSdkWorkingDirectory }
+    }
     $PSNativeCommandUseErrorActionPreference = $false
     if ($WorkingDirectory) { Push-Location -LiteralPath $WorkingDirectory }
     try {

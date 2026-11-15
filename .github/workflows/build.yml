@@ -84,9 +84,18 @@ on:
       runner-group:
         type: string
         default: bcs-runners
-      dotnet-version:
+      sdk-version:
+        description: Build SDK selector; empty preserves project configuration (default auto).
         type: string
-        default: '10.0.x'
+        default: ''
+      additional-sdks:
+        description: Additional comma/newline-separated SDK selectors.
+        type: string
+        default: ''
+      dotnet-version:
+        description: Legacy single-selector alias for sdk-version; do not supply both.
+        type: string
+        default: ''
       release:
         type: boolean
         default: false
@@ -128,12 +137,18 @@ jobs:
           powershell-tag: ${{ inputs.powershell-tag }}
           gh-version: ${{ inputs.gh-version }}
           tool-cache-path: ${{ inputs.tool-cache-path || (runner.os == 'Linux' && '/opt/hostedtoolcache' || '') }}
-      - uses: actions/setup-dotnet@v6
-        with:
-          dotnet-version: ${{ inputs.dotnet-version }}
-      - name: Verify .NET SDK
+      - name: Validate SDK inputs
         shell: pwsh
-        run: dotnet --version
+        env:
+          AMITH_SDK: ${{ inputs.sdk-version }}
+          AMITH_LEGACY_SDK: ${{ inputs.dotnet-version }}
+        run: |
+          if ($env:AMITH_SDK -and $env:AMITH_LEGACY_SDK) { throw 'Use sdk-version or its legacy dotnet-version alias, not both.' }
+      - name: Bootstrap .NET SDKs
+        uses: Amith211/Amith.Build/setup-dotnet@v0.1
+        with:
+          sdk-version: ${{ inputs.sdk-version || inputs.dotnet-version || 'auto' }}
+          additional-sdks: ${{ inputs.additional-sdks }}
       - name: Configure NuGet restore feeds
         uses: Amith211/Amith.Build/setup-nuget@v0.1
         env:
@@ -147,6 +162,8 @@ jobs:
           solution: ${{ inputs.solution }}
           project: ${{ inputs.project }}
           version: ${{ inputs.version }}
+          sdk-version: ${{ inputs.sdk-version || inputs.dotnet-version }}
+          additional-sdks: ${{ inputs.additional-sdks }}
           runtimes: ${{ inputs.runtimes }}
           pack-projects: ${{ inputs.pack-projects }}
           pack-only-projects: ${{ inputs.pack-only-projects }}

@@ -23,7 +23,9 @@ function Invoke-AmithBuildStage {
     }
     $plan.Stages[$Stage] = @{ Status = 'Running'; StartedUtc = [DateTime]::UtcNow.ToString('o') }
     Write-AmithJson $plan $PlanPath
+    $sdkScope = $null
     try {
+        if (Get-AmithValue $plan 'SdkExecution' $null) { $sdkScope = Open-AmithSdkScope -RootPath $plan.Root -Execution $plan.SdkExecution }
         Write-Host "Amith.Build: $Stage ($($plan.Version))"
         switch ($Stage) {
             Restore { Invoke-AmithRestore $plan }
@@ -43,6 +45,7 @@ function Invoke-AmithBuildStage {
         throw
     }
     finally {
+        if ($sdkScope) { Close-AmithSdkScope $sdkScope }
         $plan.Stages[$Stage].FinishedUtc = [DateTime]::UtcNow.ToString('o')
         Write-AmithJson $plan $PlanPath
     }
@@ -60,6 +63,7 @@ function Invoke-AmithBuild {
           [switch] $VersionedArchives, [switch] $UnversionedArchives,
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
           [switch] $NoTests, [switch] $SkipTests,
+          [string] $SdkVersion, [string[]] $AdditionalSdks = @(),
           [string] $PlanPath,
           [ValidateSet('Plan','Restore','Build','Test','Pack','Publish','Archive','Installer','Retain','Release')]
           [string[]] $Stages = @('Restore','Build','Test','Pack','Publish','Archive','Installer'), [switch] $PlanOnly)
@@ -72,6 +76,7 @@ function Invoke-AmithBuild {
         -not $PSBoundParameters.ContainsKey('VersionedArchives') -and -not $PSBoundParameters.ContainsKey('UnversionedArchives') -and
         -not $PSBoundParameters.ContainsKey('IncludeSymbols') -and -not $PSBoundParameters.ContainsKey('IncludeDevelopmentSettings') -and
         -not $PSBoundParameters.ContainsKey('NoTests') -and -not $PSBoundParameters.ContainsKey('SkipTests') -and
+        -not $PSBoundParameters.ContainsKey('SdkVersion') -and $AdditionalSdks.Count -eq 0 -and
         $PackageExcludes.Count -eq 0 -and (Test-Path -LiteralPath (Resolve-AmithPath $PlanPath))
     if ($reusePlan) { $plan = Read-AmithPlan (Resolve-AmithPath $PlanPath) }
     else {
@@ -80,6 +85,8 @@ function Invoke-AmithBuild {
         foreach ($option in @('SelfContained','SingleFile','StandaloneSingleFile','VersionedArchives','UnversionedArchives','IncludeSymbols','IncludeDevelopmentSettings','NoTests','SkipTests')) {
             if ($PSBoundParameters.ContainsKey($option)) { $arguments[$option] = $PSBoundParameters[$option] }
         }
+        if ($PSBoundParameters.ContainsKey('SdkVersion')) { $arguments.SdkVersion = $SdkVersion }
+        if ($AdditionalSdks.Count) { $arguments.AdditionalSdks = $AdditionalSdks }
         if ($PackageExcludes.Count) { $arguments.PackageExcludes = $PackageExcludes }
         if ($PackProjects.Count) { $arguments.PackProjects = $PackProjects }
         if ($PackOnlyProjects.Count) { $arguments.PackOnlyProjects = $PackOnlyProjects }

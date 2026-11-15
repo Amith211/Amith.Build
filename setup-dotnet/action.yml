@@ -1,0 +1,32 @@
+name: Set up .NET SDK availability
+description: Cache supported and requested SDKs and bootstrap the native SDK host without editing global.json.
+inputs:
+  sdk-version:
+    description: auto, latest, a major/channel, or an exact SDK version.
+    default: auto
+  additional-sdks:
+    description: Additional comma/newline-separated SDK selectors.
+    default: ''
+  root:
+    description: Repository root relative to the workspace.
+    default: '.'
+outputs:
+  sdk-version:
+    description: SDK selected by the native host for bootstrap.
+    value: ${{ steps.sdk.outputs.sdk_version }}
+  dotnet-root:
+    description: Cached SDK profile root.
+    value: ${{ steps.sdk.outputs.dotnet_root }}
+runs:
+  using: composite
+  steps:
+    - id: sdk
+      shell: pwsh
+      env:
+        AMITH_SETUP_ACTION: ${{ github.action_path }}
+        AMITH_SETUP_ROOT: ${{ inputs.root }}
+        AMITH_SETUP_SDK: ${{ inputs.sdk-version }}
+        AMITH_SETUP_ADDITIONAL: ${{ inputs.additional-sdks }}
+      run: |
+        $additional=@($env:AMITH_SETUP_ADDITIONAL -split '[,\r\n]+' | ForEach-Object Trim | Where-Object { $_ })
+        & (Join-Path $env:AMITH_SETUP_ACTION '../scripts/Initialize-AmithSdk.ps1') -RootPath (Join-Path $env:GITHUB_WORKSPACE $env:AMITH_SETUP_ROOT) -SdkVersion $env:AMITH_SETUP_SDK -AdditionalSdks $additional

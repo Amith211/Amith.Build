@@ -9,6 +9,7 @@ on:
       - action.yml
       - setup-nuget/**
       - setup-tools/**
+      - setup-dotnet/**
       - .github/workflows/validate.yml
       - .github/workflows/build.yml
 permissions:
@@ -47,6 +48,13 @@ jobs:
       - uses: actions/setup-dotnet@v6
         with:
           dotnet-version: '10.0.x'
+      - name: Bootstrap SDK availability
+        uses: ./setup-dotnet
+      - name: Reuse cached SDK bootstrap
+        uses: ./setup-dotnet
+      - name: Verify native SDK policy
+        shell: pwsh
+        run: dotnet --version
       - name: Unit and integration checks
         shell: pwsh
         run: ./tests/Test-AmithBuild.ps1 -Integration

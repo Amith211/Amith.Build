@@ -51,6 +51,18 @@ $configPath=Join-Path $fixture 'amith.build.psd1'
 Set-Content -LiteralPath $configPath -Value '@{ Solution = ''Fixture.sln''; Runtimes = @(''win-x64'',''linux-x64''); Exclude = @(''samples/**''); Defaults = @{ ArchiveFormats = @(''zip'') }; Overrides = @(@{Match=''src/Lib/*'';Pack=$true}) }'
 $originalGhToken=$env:GH_TOKEN; $env:GH_TOKEN='not-a-real-test-token'
 $state = @{DownloadMode='Empty';SeedPackId='Amith.Client';FailVpkChannel='';PartialVpk=$false;ReflectReleases=$false;FailToolInstall=$false;Remote=@{tag_name='v1.2.3';draft=$true;assets=@()};AssetId=0;Root=$fixture;Calls=[Collections.Generic.List[object]]::new();FailTest=$false;FailBuild=$false;FailPush=$false;FailUpload=$false}
+$sdkRequests=[Collections.Generic.List[object]]::new()
+$originalSdkFunctions=@{}
+foreach($name in @('Open-AmithSdkScope','Close-AmithSdkScope','Complete-AmithSdkScope')){
+    $originalSdkFunctions[$name]=& $module {param($name)(Get-Item "Function:$name").ScriptBlock} $name
+}
+& $module {
+    param($requests)
+    $script:SdkRequests=$requests
+    function script:Open-AmithSdkScope {param($RootPath,$SdkVersion,$AdditionalSdks,$Execution) $script:SdkRequests.Add(@{Root=$RootPath;Selector=$SdkVersion;Additional=$AdditionalSdks}); return @{Execution=$null}}
+    function script:Close-AmithSdkScope {param($Scope)}
+    function script:Complete-AmithSdkScope {param($Scope,$TargetFrameworks,$ProjectDirectories) return $null}
+} $sdkRequests
 $originalNative = & $module { (Get-Item Function:Invoke-AmithNative).ScriptBlock }
 & $module {
     param($State)
@@ -472,6 +484,7 @@ try {
     . (Join-Path $PSScriptRoot 'ConfigDiscoveryChecks.ps1')
     . (Join-Path $PSScriptRoot 'TestPolicyChecks.ps1')
     . (Join-Path $PSScriptRoot 'SdkResolutionChecks.ps1')
+    . (Join-Path $PSScriptRoot 'SdkExecutionPlanChecks.ps1')
     Check 'rebuilding invalidates previous artifact and release gates' {
         $p=Invoke-AmithBuildStage $script:built.PlanPath Build;Assert-Equal 0 $p.Artifacts.Count;Assert-True (-not $p.Stages.Contains('Pack'))
     }
@@ -479,7 +492,10 @@ try {
         $p=New-FixturePlan;Assert-Throws {& $module {param($p)Assert-AmithOutputPath $p (Join-Path $p.OutputRoot '../escape.zip')} $p} '*escaped*'
     }
 }
-finally { & $module {param($Original) Set-Item Function:script:Invoke-AmithNative -Value $Original} $originalNative; $env:GH_TOKEN=$originalGhToken; $env:AMITH_TOOL_CACHE=$originalToolCache }
+finally { & $module {param($Original) Set-Item Function:script:Invoke-AmithNative -Value $Original} $originalNative; $env:GH_TOKEN=$originalGhToken; $env:AMITH_TOOL_CACHE=$originalToolCache
+    foreach($name in $originalSdkFunctions.Keys){& $module {param($name,$body)Set-Item "Function:script:$name" $body} $name $originalSdkFunctions[$name]}
+}
+. (Join-Path $PSScriptRoot 'SdkExecutionChecks.ps1')
 Check 'real ZIP and tar archives honor both naming modes and preserve old saved-plan naming' {
     foreach($mode in @('unversioned','versioned','legacy')) {
         $root=Join-Path $testRoot ('archive-'+$mode)
@@ -550,7 +566,7 @@ if ($Integration) {
         }
     }
 }
-if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkResolutionIntegrationChecks.ps1') }
+if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkResolutionIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkExecutionIntegrationChecks.ps1') }
 . (Join-Path $PSScriptRoot 'NuGetChecks.ps1')
 Write-Host "$script:passed checks passed. Test workspace: $testRoot"
 

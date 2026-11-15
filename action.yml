@@ -19,6 +19,12 @@ inputs:
   version:
     description: SemVer package/release version, supplied to Plan.
     default: ''
+  sdk-version:
+    description: Build SDK selector; empty preserves configuration (default auto). Plan only.
+    default: ''
+  additional-sdks:
+    description: Additional comma/newline-separated SDK selectors, additive to configuration. Plan only.
+    default: ''
   runtimes:
     description: Optional runtime list, for example win-x64,linux-x64. Windows-only apps automatically retain Windows targets.
     default: ''
@@ -71,6 +77,12 @@ inputs:
     description: Saved build plan, relative to the consumer workspace.
     default: '.amith-build/plan.json'
 outputs:
+  sdk-version:
+    description: SDK selected for the persisted plan.
+    value: ${{ steps.stage.outputs.sdk_version }}
+  dotnet-root:
+    description: SDK profile used by the plan.
+    value: ${{ steps.stage.outputs.dotnet_root }}
   plan-path:
     description: Absolute saved build-plan path.
     value: ${{ steps.stage.outputs.plan_path }}
@@ -93,6 +105,8 @@ runs:
         AMITH_SOLUTION: ${{ inputs.solution }}
         AMITH_PROJECT: ${{ inputs.project }}
         AMITH_VERSION: ${{ inputs.version }}
+        AMITH_SDK_VERSION: ${{ inputs.sdk-version }}
+        AMITH_ADDITIONAL_SDKS: ${{ inputs.additional-sdks }}
         AMITH_RUNTIMES: ${{ inputs.runtimes }}
         AMITH_PACK_PROJECTS: ${{ inputs.pack-projects }}
         AMITH_PACK_ONLY_PROJECTS: ${{ inputs.pack-only-projects }}
@@ -120,6 +134,8 @@ runs:
           if ($env:AMITH_SOLUTION) { $arguments.Solution = $env:AMITH_SOLUTION }
           if ($env:AMITH_PROJECT) { $arguments.ProjectPath = @($env:AMITH_PROJECT) }
           if ($env:AMITH_VERSION) { $arguments.Version = $env:AMITH_VERSION }
+          if ($env:AMITH_SDK_VERSION) { $arguments.SdkVersion = $env:AMITH_SDK_VERSION }
+          if ($env:AMITH_ADDITIONAL_SDKS) { $arguments.AdditionalSdks = @($env:AMITH_ADDITIONAL_SDKS -split '[,\r\n]+' | ForEach-Object Trim | Where-Object { $_ }) }
           if ($env:AMITH_RUNTIMES) { $arguments.Runtimes = @($env:AMITH_RUNTIMES -split ',' | ForEach-Object Trim | Where-Object { $_ }) }
           foreach ($entry in @(
             @{ Name = 'PackProjects'; Value = $env:AMITH_PACK_PROJECTS },
@@ -141,12 +157,12 @@ runs:
           if ($env:AMITH_VERSIONED_ARCHIVES) { $arguments.VersionedArchives = [bool]::Parse($env:AMITH_VERSIONED_ARCHIVES) }
           if ([bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) { $arguments.UnversionedArchives = $true }
         }
-        elseif ($env:AMITH_PACK_PROJECTS -or $env:AMITH_PACK_ONLY_PROJECTS -or $env:AMITH_EXCLUDE_PACK_PROJECTS -or
+        elseif ($env:AMITH_SDK_VERSION -or $env:AMITH_ADDITIONAL_SDKS -or $env:AMITH_PACK_PROJECTS -or $env:AMITH_PACK_ONLY_PROJECTS -or $env:AMITH_EXCLUDE_PACK_PROJECTS -or
                 [bool]::Parse($env:AMITH_PACK_ALL_LIBRARIES) -or [bool]::Parse($env:AMITH_NO_PACK) -or
                 $env:AMITH_NO_TESTS -or $env:AMITH_SKIP_TESTS -or
                 $env:AMITH_SELF_CONTAINED -or $env:AMITH_SINGLE_FILE -or [bool]::Parse($env:AMITH_STANDALONE_SINGLE_FILE) -or
                 $env:AMITH_INCLUDE_SYMBOLS -or $env:AMITH_INCLUDE_DEVELOPMENT_SETTINGS -or $env:AMITH_PACKAGE_EXCLUDES -or
                 $env:AMITH_VERSIONED_ARCHIVES -or [bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) {
-          throw 'Packaging, deployment and test-policy inputs must be supplied to the Plan stage; later stages reuse its selections.'
+          throw 'SDK, packaging, deployment and test-policy inputs must be supplied to the Plan stage; later stages reuse its selections.'
         }
         & (Join-Path $env:AMITH_ACTION_ROOT 'scripts/Invoke-AmithBuild.ps1') @arguments

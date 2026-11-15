@@ -523,7 +523,7 @@ The tool-cache-path input overrides the cache location. The shared workflow defa
 
 Installations are separated by tool, version, OS and architecture. Cache hits still restore PATH and validate the executable. Locks prevent concurrent writers from installing over each other; incomplete installations have no ready marker and are replaced on the next attempt. An interrupted Node installation may leave a lock directory; after confirming no installer is running, remove that specific lock and retry. Cached tools are not uploaded with release artifacts. Keep the cache on a trusted runner volume.
 
-Velopack keeps the existing selection order: explicit ToolVersion, restored Velopack dependency version, then an installed vpk if no version can be inferred. Selected versions use the persistent cache instead of the build output directory. Tools needing an unavailable .NET runtime fail with the native tool error; the .NET installation policy is unchanged.
+Velopack keeps the existing selection order: explicit ToolVersion, restored Velopack dependency version, then an installed vpk if no version can be inferred. Selected versions use the persistent cache instead of the build output directory. SDK availability and build selection are controlled by the SDK setup below; add an older SDK when a tool requires its runtime.
 
 Linux shared builds also check/install zstd using apt-get (with sudo for non-root runners). This requires an Ubuntu/Debian-compatible runner and installation privileges when zstd is missing. For v0.1, legacy PATH discovery is retained across the existing tool roots, tolerating missing directories and paths containing spaces. Selected PowerShell/GitHub CLI installations take precedence.
 
@@ -539,22 +539,50 @@ Consumer-owned workflows can use the same setup without the reusable workflow:
 
 The action supports Windows/Linux x64 and arm64; validation runs x64 on both operating systems. Existing .NET setup and NuGet credential configuration remain separate.
 
-## SDK requirements resolution
+## SDK selection and availability
 
-Resolve-AmithSdkRequirements and scripts/Resolve-AmithSdk.ps1 provide metadata-only SDK preflight. They read Microsoft's release index and channel history. This preflight does not install SDKs, change PATH, select an SDK for a build, or change global.json. The existing workflow's dotnet-version input and existing build commands continue to work as before.
+Local builds and shared workflow stages select an SDK through the native .NET host using a cached SDK profile. SdkVersion defaults to auto. CLI selection overrides repository configuration; AdditionalSdks adds to configured SDK availability.
 
 ~~~powershell
-Import-Module ./src/Amith.Build/Amith.Build.psd1
-Resolve-AmithSdkRequirements -RootPath ./ -SdkVersion 10 -AdditionalSdks 8.0.x
-./scripts/Resolve-AmithSdk.ps1 -RootPath ./ -TargetFrameworks netstandard2.0,net10.0 -OutputPath ./sdk-requirements.json
+Invoke-AmithBuild -Version 1.2.3 -SdkVersion 10 -AdditionalSdks 8.0.x
 ~~~
 
-Selectors are auto (default), latest (latest supported stable SDK), a major such as 10, a channel such as 10.0 or 10.0.x, or an exact version such as 10.0.100. Explicit exact prerelease versions are allowed when present in Microsoft's metadata; a preview channel is never selected implicitly. AdditionalSdks accepts the same selectors except auto. Additional versions expand availability without changing the build request.
+~~~powershell
+@{
+    SdkVersion = 'auto'
+    AdditionalSdks = @('8.0.x')
+}
+~~~
 
-Auto first discovers the nearest global.json from RootPath upward. An SDK policy there takes precedence over framework inference. Otherwise, pass the frameworks already evaluated by MSBuild: the highest modern target determines the SDK channel, including platform suffixes such as net10.0-windows. Successfully evaluated .NET Standard/.NET Framework-only targets fall back to the newest supported stable LTS SDK. Missing or unrecognised targets fail and request an explicit selection. This preflight does not scan project XML or infer whether a failed evaluation was a legacy project.
+Selectors are auto, latest (latest supported stable SDK), a major such as 10, a channel such as 10.0 or 10.0.x, or an exact version such as 10.0.100. Exact prerelease SDKs must be requested explicitly. AdditionalSdks accepts the same selectors except auto and never changes the selected build SDK.
 
-The result records RequestedSdkVersion, SelectionSource, BootstrapSdkVersion, SupportedSdkVersions, AdditionalSdkVersions and a deduplicated InstallSdkVersions list. Supported SDKs come from stable channels in active/maintenance support, independently of the requested build SDK. End-of-life channels can still be explicitly requested or inferred from an old target.
+Auto honours an existing global.json SDK policy first. Without one, it uses the latest supported stable SDK to evaluate the selected projects with MSBuild, selects the highest evaluated modern target's SDK channel, then evaluates project defaults again under the selected SDK. Evaluated .NET Standard/.NET Framework-only targets use the latest supported stable LTS SDK. Evaluation failures and unknown targets require an explicit selection; SDK-dependent target declarations that do not converge also fail clearly. Framework targets are not changed.
 
-GlobalJson contains the discovered path and untouched SDK policy. When that policy governs auto selection, RequestedSdkVersion is empty: the native .NET host must choose the final SDK under that policy. An exact global.json baseline is included in the installation requirements, alongside supported SDKs and additional requests. RequiresGlobalJsonValidation explicitly marks policy-bearing results that still need native host validation; an explicit SDK request is not proof of compatibility with global.json. This command does not perform SDK installation, project evaluation/bootstrap, final selection or conflict enforcement. No global.json bypass is provided.
+Every supported stable channel in active/maintenance support is available in the cache, together with explicitly requested additional versions and any global.json baseline. Installed SDKs are reused where possible. Missing SDK archives come from Microsoft's release metadata and are verified against its SHA512 checksums. Windows/Linux x64 and arm64 are supported; Alpine uses the linux-musl SDK archive.
 
-The requirements output contains machine paths. Keep saved preflight results with local build metadata rather than committing them to a public repository. Microsoft's [release metadata](https://github.com/dotnet/core/tree/main/release-notes) supplies versions; the [.NET host's global.json rules](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json) remain authoritative for SDK policy.
+Profiles use an ordinary portable .NET directory layout, containing the requested SDKs and the available runtimes/reference packs. They do not edit global.json or use symlinks to override it. The native host decides whether a request satisfies the existing policy. Compatible policies work normally; incompatible requests fail with the requested/selected SDK information. Nested project policies must agree with the selected build SDK. No IgnoreGlobalJson switch is provided.
+
+The saved plan records the chosen SDK profile and global.json snapshots. Later stages validate them before executing; policy changes or missing profiles require a fresh plan. Local commands restore PATH and .NET environment variables on success and failure. Workflow scripts export the selected host for subsequent steps. Profiles and SDK downloads remain in the trusted tool cache, outside retained release artifacts. First use needs download space plus profile copies; subsequent matching builds reuse them.
+
+The shared workflow exposes sdk-version and comma/newline-separated additional-sdks. An empty sdk-version preserves configuration and the auto default. The older dotnet-version input remains a single-selector alias; supplying both names fails. Multi-version installation belongs in additional-sdks. Bootstrap runs before NuGet feed setup, then Plan applies repository configuration and target inference.
+
+For consumer-owned workflows, use setup-tools first (PowerShell bootstrap), then setup-dotnet before configuring restore feeds and calling Plan:
+
+~~~yaml
+- uses: Amith211/Amith.Build/setup-dotnet@v0.1
+  with:
+    sdk-version: auto
+    additional-sdks: |
+      8.0.x
+~~~
+
+The standalone Resolve-AmithSdkRequirements command and scripts/Resolve-AmithSdk.ps1 still provide metadata-only preflight:
+
+~~~powershell
+Resolve-AmithSdkRequirements -RootPath ./ -SdkVersion 10 -AdditionalSdks 8.0.x
+./scripts/Resolve-AmithSdk.ps1 -RootPath ./ -TargetFrameworks netstandard2.0,net10.0
+~~~
+
+That preflight alone does not install or select an SDK. It returns RequestedSdkVersion, SelectionSource, BootstrapSdkVersion, SupportedSdkVersions, AdditionalSdkVersions, InstallSdkVersions and the discovered GlobalJson policy. RequiresGlobalJsonValidation marks results still requiring native host validation. Saved preflight/build plans contain machine paths and should stay with private/local build metadata.
+
+SDK setup does not install OS prerequisites, native compilers, workloads or credential providers. Add an older SDK when a test/tool requires its runtime; unsupported runtime dependencies still fail through the native tool. Previously saved plans without SDK execution metadata retain their earlier host-resolution behaviour; create a fresh plan to adopt SDK selection. Microsoft's [release metadata](https://github.com/dotnet/core/tree/main/release-notes) supplies versions, and the [.NET host's global.json rules](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json) remain authoritative.

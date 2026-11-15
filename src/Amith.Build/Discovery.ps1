@@ -105,6 +105,7 @@ function New-AmithBuildPlan {
           [switch] $VersionedArchives, [switch] $UnversionedArchives,
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
           [switch] $NoTests, [switch] $SkipTests,
+          [string] $SdkVersion, [string[]] $AdditionalSdks = @(),
           [string] $PlanPath = '.amith-build/plan.json')
     $deploymentOverrides = Get-AmithDeploymentOverrides $PSBoundParameters
     $archiveOverrides = Get-AmithArchiveOverrides $PSBoundParameters
@@ -146,87 +147,108 @@ function New-AmithBuildPlan {
     Assert-AmithVersion $Version
     $configuration = [string](Get-AmithValue $config 'Configuration' 'Release')
     if ($configuration -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Configuration must be a simple MSBuild configuration name.' }
-    $discover = ConvertTo-AmithBoolean (Get-AmithValue $config 'Discover' $true)
-    $entries = @(Get-AmithValue $config 'Projects' @()) + @($Projects)
-    if ($ProjectPath.Count) {
-        # A direct -Project selection means only those roots. Keep any matching
-        # configured project settings, plus normal Defaults/Overrides.
-        $selected = @()
-        foreach ($requested in $ProjectPath) {
-            $absolute = Resolve-AmithPath $requested $root
-            $definition = @{ Path = $requested }
-            foreach ($entry in $entries) {
-                if ($entry -is [string]) { $entry = @{ Path = $entry } }
-                if ((Resolve-AmithPath ([string](Get-AmithValue $entry 'Path' '')) $root) -eq $absolute) { $definition = Merge-AmithProjectSettings $definition $entry }
+    $sdkSelector = if ($PSBoundParameters.ContainsKey('SdkVersion')) { $SdkVersion } else { [string](Get-AmithValue $config 'SdkVersion' 'auto') }
+    $sdkAdditional = @(Get-AmithValue $config 'AdditionalSdks' @()) + @($AdditionalSdks)
+    $sdkScope = Open-AmithSdkScope $root $sdkSelector $sdkAdditional
+    try {
+        $discover = ConvertTo-AmithBoolean (Get-AmithValue $config 'Discover' $true)
+        $entries = @(Get-AmithValue $config 'Projects' @()) + @($Projects)
+        if ($ProjectPath.Count) {
+            # A direct -Project selection means only those roots. Keep any matching
+            # configured project settings, plus normal Defaults/Overrides.
+            $selected = @()
+            foreach ($requested in $ProjectPath) {
+                $absolute = Resolve-AmithPath $requested $root
+                $definition = @{ Path = $requested }
+                foreach ($entry in $entries) {
+                    if ($entry -is [string]) { $entry = @{ Path = $entry } }
+                    if ((Resolve-AmithPath ([string](Get-AmithValue $entry 'Path' '')) $root) -eq $absolute) { $definition = Merge-AmithProjectSettings $definition $entry }
+                }
+                $selected += $definition
             }
-            $selected += $definition
+            $entries = $selected; $discover = $false
         }
-        $entries = $selected; $discover = $false
-    }
-    if ($Runtimes.Count -eq 0) { $Runtimes = @(Get-AmithValue $config 'Runtimes' @()) }
-    $exclusions = @(Get-AmithValue $config 'Exclude' @()) + @($Exclude)
-    $definitions = @{}
-    if ($discover) {
-        if (-not $Solution) { $Solution = [string](Get-AmithValue $config 'Solution' '') }
-        if (-not $Solution) {
-            $solutions = @(Get-ChildItem -LiteralPath $root -File | Where-Object Extension -in '.sln', '.slnx')
-            if ($solutions.Count -gt 1) { throw 'Multiple solutions found; specify Solution explicitly.' }
-            if ($solutions.Count -eq 1) { $Solution = $solutions[0].FullName }
+        if ($Runtimes.Count -eq 0) { $Runtimes = @(Get-AmithValue $config 'Runtimes' @()) }
+        $exclusions = @(Get-AmithValue $config 'Exclude' @()) + @($Exclude)
+        $definitions = @{}
+        if ($discover) {
+            if (-not $Solution) { $Solution = [string](Get-AmithValue $config 'Solution' '') }
+            if (-not $Solution) {
+                $solutions = @(Get-ChildItem -LiteralPath $root -File | Where-Object Extension -in '.sln', '.slnx')
+                if ($solutions.Count -gt 1) { throw 'Multiple solutions found; specify Solution explicitly.' }
+                if ($solutions.Count -eq 1) { $Solution = $solutions[0].FullName }
+            }
+            if ($Solution) {
+                $Solution = Resolve-AmithPath $Solution $root
+                foreach ($path in @(Get-AmithSolutionProjects $Solution)) { $definitions[$path] = @{} }
+            } elseif ($entries.Count -eq 0) {
+                $single = @(Get-ChildItem -LiteralPath $root -File | Where-Object Extension -in '.csproj', '.fsproj', '.vbproj')
+                if ($single.Count -ne 1) { throw 'Specify Solution or Projects; no single root solution/project was found.' }
+                $definitions[$single[0].FullName] = @{}
+            }
         }
-        if ($Solution) {
-            $Solution = Resolve-AmithPath $Solution $root
-            foreach ($path in @(Get-AmithSolutionProjects $Solution)) { $definitions[$path] = @{} }
-        } elseif ($entries.Count -eq 0) {
-            $single = @(Get-ChildItem -LiteralPath $root -File | Where-Object Extension -in '.csproj', '.fsproj', '.vbproj')
-            if ($single.Count -ne 1) { throw 'Specify Solution or Projects; no single root solution/project was found.' }
-            $definitions[$single[0].FullName] = @{}
+        foreach ($entry in $entries) {
+            if ($entry -is [string]) { $entry = @{ Path = $entry } }
+            $path = Resolve-AmithPath ([string](Get-AmithValue $entry 'Path' '')) $root
+            if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Configured project does not exist: $path" }
+            $definitions[$path] = Merge-AmithProjectSettings (Get-AmithValue $definitions $path @{}) $entry
         }
-    }
-    foreach ($entry in $entries) {
-        if ($entry -is [string]) { $entry = @{ Path = $entry } }
-        $path = Resolve-AmithPath ([string](Get-AmithValue $entry 'Path' '')) $root
-        if (-not (Test-Path -LiteralPath $path -PathType Leaf)) { throw "Configured project does not exist: $path" }
-        $definitions[$path] = Merge-AmithProjectSettings (Get-AmithValue $definitions $path @{}) $entry
-    }
-    $planned = @()
-    foreach ($path in @($definitions.Keys | Sort-Object)) {
-        $relative = [IO.Path]::GetRelativePath($root, $path).Replace('\', '/')
-        if (@($exclusions | Where-Object { Test-AmithPattern $relative $_ }).Count) { continue }
-        $settings = Merge-AmithProjectSettings (Get-AmithValue $config 'Defaults' @{}) $definitions[$path]
-        foreach ($override in @(Get-AmithValue $config 'Overrides' @())) {
-            $pattern = [string](Get-AmithValue $override 'Match' '')
-            if (-not $pattern) { throw 'Each Overrides entry needs Match.' }
-            if (Test-AmithPattern $relative $pattern) { $settings = Merge-AmithProjectSettings $settings $override }
+        $planned = @()
+        $evaluations = @()
+        foreach ($path in @($definitions.Keys | Sort-Object)) {
+            $relative = [IO.Path]::GetRelativePath($root, $path).Replace('\', '/')
+            if (@($exclusions | Where-Object { Test-AmithPattern $relative $_ }).Count) { continue }
+            $settings = Merge-AmithProjectSettings (Get-AmithValue $config 'Defaults' @{}) $definitions[$path]
+            foreach ($override in @(Get-AmithValue $config 'Overrides' @())) {
+                $pattern = [string](Get-AmithValue $override 'Match' '')
+                if (-not $pattern) { throw 'Each Overrides entry needs Match.' }
+                if (Test-AmithPattern $relative $pattern) { $settings = Merge-AmithProjectSettings $settings $override }
+            }
+            if (ConvertTo-AmithBoolean (Get-AmithValue $settings 'Exclude' $false)) { continue }
+            $settings = Merge-AmithMap $settings $archiveOverrides
+            foreach ($option in @('IncludeSymbols','IncludeDevelopmentSettings')) {
+                if ($PSBoundParameters.ContainsKey($option)) { $settings[$option] = [bool]$PSBoundParameters[$option] }
+            }
+            $settings.PackageExcludes = @(Get-AmithValue $settings 'PackageExcludes' @()) + $PackageExcludes
+            $evaluations += @{Path=$path;Settings=$settings}
+            $planned += Get-AmithProjectPlan $path $settings $root $configuration $Runtimes $Version $deploymentOverrides
         }
-        if (ConvertTo-AmithBoolean (Get-AmithValue $settings 'Exclude' $false)) { continue }
-        $settings = Merge-AmithMap $settings $archiveOverrides
-        foreach ($option in @('IncludeSymbols','IncludeDevelopmentSettings')) {
-            if ($PSBoundParameters.ContainsKey($option)) { $settings[$option] = [bool]$PSBoundParameters[$option] }
+        if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
+        $bootstrapVersion = if ($sdkScope.Execution) { $sdkScope.Execution.Version } else { '' }
+        $sdkExecution = Complete-AmithSdkScope $sdkScope @($planned | ForEach-Object { $_.Frameworks }) @($planned | ForEach-Object { Split-Path -Parent $_.Path })
+        if ($sdkExecution -and $sdkExecution.Version -cne $bootstrapVersion) {
+            # Read SDK-dependent defaults again under the SDK that will actually build.
+            $planned = @()
+            foreach ($evaluation in $evaluations) {
+                $planned += Get-AmithProjectPlan $evaluation.Path $evaluation.Settings $root $configuration $Runtimes $Version $deploymentOverrides
+            }
+            $channel = Get-AmithFrameworkSdkChannel @($planned | ForEach-Object { $_.Frameworks })
+            if ($channel -and $channel -cne (Get-AmithSdkVersionParts $sdkExecution.Version).Channel) {
+                throw 'Target frameworks changed after SDK selection. Supply SdkVersion explicitly for SDK-dependent target declarations.'
+            }
         }
-        $settings.PackageExcludes = @(Get-AmithValue $settings 'PackageExcludes' @()) + $PackageExcludes
-        $planned += Get-AmithProjectPlan $path $settings $root $configuration $Runtimes $Version $deploymentOverrides
-    }
-    Assert-AmithNoTestsDeclaration $planned $testPolicy
-    if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
-    $duplicates = @($planned | Group-Object Name | Where-Object Count -gt 1)
-    if ($duplicates.Count) { throw 'Duplicate artifact names; supply unique Name overrides for those projects.' }
-    Set-AmithPackSelection -Projects $planned -PackProjects $PackProjects -PackOnlyProjects $PackOnlyProjects `
-        -ExcludePackProjects $ExcludePackProjects -PackAllLibraries:$PackAllLibraries -NoPack:$NoPack
-    $runId = [Guid]::NewGuid().ToString('N').Substring(0, 12)
-    $outputBase = Resolve-AmithPath ([string](Get-AmithValue $config 'Output' 'artifacts')) $root
-    $outputRoot = Join-Path (Join-Path $outputBase $Version) $runId
-    $plan = @{
-        SchemaVersion = $script:AmithPlanSchemaVersion; Root = $root; Solution = $Solution; Version = $Version; ExplicitVersion = $explicitVersion; SourceCommit = Get-AmithSourceCommit $root
-        Configuration = $configuration; RunId = $runId; OutputRoot = $outputRoot; OutputBase = $outputBase; Projects = @($planned)
-        TestPolicy = $testPolicy
-        Artifacts = @(); Stages = @{}; Release = Get-AmithValue $config 'Release' @{}
-        PlanPath = Resolve-AmithPath $PlanPath $root
-    }
-    Write-AmithJson $plan $plan.PlanPath
-    Write-Host "Build plan: $($plan.PlanPath)"
-    Write-Host ("Test policy: " + $(if ($testPolicy.NoTests) {'NoTests'} elseif ($testPolicy.SkipTests) {'SkipTests'} else {'Required'}))
-    foreach ($project in $planned) { Write-Host ("  {0}: {1} [{2}]{3}" -f $project.Name, $project.Kind, (($project.Targets | ForEach-Object Runtime) -join ', '), $(if ($project.Pack) { ' Pack=true' } else { '' })) }
-    return $plan
+        Assert-AmithNoTestsDeclaration $planned $testPolicy
+        if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
+        $duplicates = @($planned | Group-Object Name | Where-Object Count -gt 1)
+        if ($duplicates.Count) { throw 'Duplicate artifact names; supply unique Name overrides for those projects.' }
+        Set-AmithPackSelection -Projects $planned -PackProjects $PackProjects -PackOnlyProjects $PackOnlyProjects `
+            -ExcludePackProjects $ExcludePackProjects -PackAllLibraries:$PackAllLibraries -NoPack:$NoPack
+        $runId = [Guid]::NewGuid().ToString('N').Substring(0, 12)
+        $outputBase = Resolve-AmithPath ([string](Get-AmithValue $config 'Output' 'artifacts')) $root
+        $outputRoot = Join-Path (Join-Path $outputBase $Version) $runId
+        $plan = @{
+            SchemaVersion = $script:AmithPlanSchemaVersion; Root = $root; Solution = $Solution; Version = $Version; ExplicitVersion = $explicitVersion; SourceCommit = Get-AmithSourceCommit $root
+            Configuration = $configuration; RunId = $runId; OutputRoot = $outputRoot; OutputBase = $outputBase; Projects = @($planned)
+            TestPolicy = $testPolicy; SdkExecution = $sdkExecution
+            Artifacts = @(); Stages = @{}; Release = Get-AmithValue $config 'Release' @{}
+            PlanPath = Resolve-AmithPath $PlanPath $root
+        }
+        Write-AmithJson $plan $plan.PlanPath
+        Write-Host "Build plan: $($plan.PlanPath)"
+        Write-Host ("Test policy: " + $(if ($testPolicy.NoTests) {'NoTests'} elseif ($testPolicy.SkipTests) {'SkipTests'} else {'Required'}))
+        foreach ($project in $planned) { Write-Host ("  {0}: {1} [{2}]{3}" -f $project.Name, $project.Kind, (($project.Targets | ForEach-Object Runtime) -join ', '), $(if ($project.Pack) { ' Pack=true' } else { '' })) }
+        return $plan
+    } finally { Close-AmithSdkScope $sdkScope }
 }
 
 function Set-AmithPackSelection {

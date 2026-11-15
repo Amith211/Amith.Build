@@ -8,10 +8,13 @@ param([string] $ConfigPath, [string] $Solution, [string] $RootPath,
           [switch] $VersionedArchives, [switch] $UnversionedArchives,
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
       [switch] $NoTests, [switch] $SkipTests,
+      [string] $SdkVersion, [string[]] $AdditionalSdks = @(),
       [string] $PlanPath, [string[]] $Stages, [switch] $PlanOnly)
 $ErrorActionPreference = 'Stop'
 Import-Module (Join-Path $PSScriptRoot '../src/Amith.Build/Amith.Build.psd1') -Force
 $plan = Invoke-AmithBuild @PSBoundParameters
+$sdkExecution=if($plan.Contains('SdkExecution')){$plan.SdkExecution}else{$null}
+& (Get-Module Amith.Build) {param($execution)Write-AmithSdkGitHubEnvironment $execution} $sdkExecution
 Write-Host "Artifacts: $($plan.OutputRoot)"
 
 if ($env:GITHUB_OUTPUT) {

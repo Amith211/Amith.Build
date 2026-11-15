@@ -1,5 +1,5 @@
 # Metadata resolution only: the .NET host remains responsible for global.json
-# roll-forward and final SDK selection when execution is wired up.
+# roll-forward and final SDK selection during execution setup.
 function Get-AmithDotNetJson {
     param([Parameter(Mandatory)][string]$Uri)
     try {
