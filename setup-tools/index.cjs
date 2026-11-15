@@ -128,8 +128,43 @@ async function legacyPaths(roots) {
       else if (entry.isDirectory() && depth > 0) await visit(path.join(directory, entry.name), depth - 1);
     }
   }
-  for (const root of roots.filter(Boolean)) await visit(root, 5);
+  for (const root of roots.filter(Boolean)) await visit(root, 4);
   return [...directories];
+}
+function buildToolPath(required, legacy, existing, platform = process.platform) {
+  const delimiter = platform === 'win32' ? ';' : ':';
+  // Leave room for the runner's remaining environment and later tool setup.
+  const budget = platform === 'win32' ? 24000 : 64000;
+  const key = directory => platform === 'win32' ? directory.toLowerCase() : directory;
+  const seen = new Set();
+  const inherited = [];
+  for (const directory of (existing || '').split(delimiter)) {
+    if (directory && !seen.has(key(directory))) {
+      seen.add(key(directory));
+      inherited.push(directory);
+    }
+  }
+  const additions = [];
+  for (const directory of required) {
+    if (/[\r\n]/.test(directory)) throw new Error('PATH entry must be a single line.');
+    const index = inherited.findIndex(entry => key(entry) === key(directory));
+    if (index >= 0) inherited.splice(index, 1);
+    if (!additions.some(entry => key(entry) === key(directory))) additions.push(directory);
+    seen.add(key(directory));
+  }
+  const size = value => platform === 'win32' ? value.length : Buffer.byteLength(value);
+  let value = [...additions, ...inherited].join(delimiter);
+  if (size(value) > budget) throw new Error('Existing PATH and required tools exceed the safe PATH budget.');
+  let omitted = 0;
+  for (const directory of legacy) {
+    if (/[\r\n]/.test(directory)) throw new Error('PATH entry must be a single line.');
+    if (seen.has(key(directory))) continue;
+    seen.add(key(directory));
+    if (size(value) + size(directory) + delimiter.length > budget) { omitted++; continue; }
+    additions.push(directory);
+    value = [...additions, ...inherited].join(delimiter);
+  }
+  return { additions, value, omitted };
 }
 async function main() {
   const input = name => process.env['INPUT_' + name.toUpperCase()] || '';
@@ -142,14 +177,16 @@ async function main() {
     ...(process.platform === 'linux' ? ['/usr/local/bin', '/usr/bin'] : [])]);
   const pwsh = await installTool('pwsh', { root, version: input('powershell-tag'), token: input('token') });
   const gh = await installTool('gh', { root, version: input('gh-version'), token: input('token') });
-  const additions = [...new Set([path.dirname(pwsh), path.dirname(gh), ...legacy])];
-  for (const directory of additions) if (/[\r\n]/.test(directory)) throw new Error('PATH entry must be a single line.');
-  process.env.PATH = additions.join(path.delimiter) + path.delimiter + process.env.PATH;
+  const selected = buildToolPath([path.dirname(pwsh), path.dirname(gh)], legacy, process.env.PATH);
+  const additions = selected.additions;
+  process.env.PATH = selected.value;
+  console.log('Tool PATH: ' + additions.length + ' additions; ' + selected.omitted + ' optional directories omitted.');
+  if (selected.omitted) console.log('::warning::Legacy tool discovery exceeded the safe PATH budget; optional directories were omitted.');
   if (process.env.GITHUB_PATH) await fs.appendFile(process.env.GITHUB_PATH, [...additions].reverse().join(os.EOL) + os.EOL);
   if (process.env.GITHUB_ENV) await fs.appendFile(process.env.GITHUB_ENV, 'AMITH_TOOL_CACHE=' + root + os.EOL);
   if (process.env.GITHUB_OUTPUT) await fs.appendFile(process.env.GITHUB_OUTPUT, 'cache-root=' + root + os.EOL);
   console.log(run('pwsh', ['--version']));
   console.log(run('gh', ['--version']));
 }
-module.exports = { cacheRoot, versionTag, assetName, ready, installCached, legacyPaths };
+module.exports = { cacheRoot, versionTag, assetName, ready, installCached, legacyPaths, buildToolPath };
 if (require.main === module) main().catch(error => { console.error(error.message); process.exitCode = 1; });

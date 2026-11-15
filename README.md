@@ -2,7 +2,7 @@
 
 One maintained set of PowerShell build/release tools for .NET libraries, Windows desktop applications, console applications and web APIs. The same implementation is used by local commands, a stage-based GitHub composite action and a reusable workflow.
 
-The intended repository is `Amith211/Amith.Build`. No repository, release or moving `v0.1` tag is created automatically by these files.
+The intended repository is `Amith211/Amith.Build`. Release tags are created explicitly after validation; these files do not publish releases automatically.
 
 ## Quick start: local
 
@@ -336,7 +336,7 @@ The reusable workflow configures dependency feeds before Plan/Restore. Consumers
 ```yaml
 jobs:
   build:
-    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1
+    uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.1
     with:
       version: ${{ inputs.version }}
     secrets:
@@ -376,7 +376,7 @@ For a consumer-owned workflow using individual composite stages, call the setup 
 
 ```yaml
 - name: Configure NuGet restore feeds
-  uses: Amith211/Amith.Build/setup-nuget@v0.1
+  uses: Amith211/Amith.Build/setup-nuget@v0.1.1
   env:
     AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
 ```
@@ -451,26 +451,26 @@ Completed Velopack channel uploads are recorded in the plan and verified against
 
 ```yaml
 - name: Plan
-  uses: Amith211/Amith.Build@v0.1
+  uses: Amith211/Amith.Build@v0.1.1
   with:
     stage: Plan
     config: amith.build.psd1
     version: ${{ inputs.version }}
     runtimes: win-x64,linux-x64
 - name: Restore
-  uses: Amith211/Amith.Build@v0.1
+  uses: Amith211/Amith.Build@v0.1.1
   with:
     stage: Restore
 - name: Build
-  uses: Amith211/Amith.Build@v0.1
+  uses: Amith211/Amith.Build@v0.1.1
   with:
     stage: Build
 - name: Test
-  uses: Amith211/Amith.Build@v0.1
+  uses: Amith211/Amith.Build@v0.1.1
   with:
     stage: Test
 - name: Package
-  uses: Amith211/Amith.Build@v0.1
+  uses: Amith211/Amith.Build@v0.1.1
   with:
     stage: Pack,Publish,Archive,Installer
 ```
@@ -480,7 +480,7 @@ The caller checks out its source and sets up SDKs first. The action runs on the 
 `examples/github/caller.yml` demonstrates the complete reusable workflow, with:
 
 ```yaml
-uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1
+uses: Amith211/Amith.Build/.github/workflows/build.yml@v0.1.1
 with:
   version: ${{ inputs.version }}
   runner-group: Amith-runners
@@ -488,7 +488,7 @@ with:
   release: true
 ```
 
-The reusable workflow calls the matching `@v0.1` action for each stage. `@v0.1` is the maintained 0.1 development release line; incompatible API/configuration changes after its initial release belong in a new minor line such as `@v0.2`. Both references must exist before consumption. For immutable builds, use a fully pinned caller/action arrangement instead of assuming a pinned workflow freezes its internal moving action reference. Use the composite directly with a pinned SHA when that is required.
+The reusable workflow calls the matching `@v0.1.1` actions for each stage. Published version tags remain fixed. Patch releases use new tags such as `v0.1.2`; consumers select the version they want to test or adopt. Incompatible changes can occur while the tooling is prerelease and should be documented in release notes.
 
 The reusable full-release workflow requests `contents: write` for GitHub release support. A NuGet-only consumer can use the composite action with `contents: read`. Supply `NUGET_SOURCE_URL`/`NUGET_API_KEY` for feed publishing and `RELEASE_TOKEN` when a custom GitHub token is needed. The built-in caller token is the default GitHub token. `vpk` is needed only when Installer is enabled for a project; project-specific Velopack tools are isolated rather than globally updated. The reusable workflow bootstraps PowerShell and GitHub CLI through the shared setup-tools action; `powershell-tag` can pin its release.
 
@@ -522,7 +522,7 @@ This keeps the job allocated; it does not start SSH services or an interactive s
 Consumer-owned workflows can register the same action before their other steps. Use a 360-minute job timeout to match the shared budget; a shorter job/step timeout can terminate the hold earlier:
 
 ~~~yaml
-- uses: Amith211/Amith.Build/runner-diagnostics@v0.1
+- uses: Amith211/Amith.Build/runner-diagnostics@v0.1.1
   with:
     keep-runner-alive: true
     keep-runner-alive-minutes: -1
@@ -535,9 +535,9 @@ The public `Amith211/Amith.Build` can be consumed by personal and organisation r
 
 ## Maintaining the shared release line
 
-Publish immutable version tags such as `v0.1.0` and `v0.1.1` after validation, then advance the compatible `v0.1` tag to that tested commit. Existing consumers of `@v0.1` receive that improvement on their next run. Updating the default branch alone does not update `@v0.1`; advancing the release line is one central maintenance operation. After the initial 0.1 release, incompatible API/configuration changes should use a new minor line such as `v0.2` instead of changing the contract under existing callers.
+Publish signed, fixed version tags after validation. Do not move a previously published tag to deliver a patch; publish a new version and update the caller reference. Mark early releases as prereleases in GitHub.
 
-The repository and initial tags still need publishing before any `Amith211/Amith.Build@v0.1` example can run. This implementation does not automatically create a remote repository or move tags.
+Examples require the referenced version tag to exist. This implementation does not automatically create a remote repository or move tags.
 
 ## Validation
 
@@ -562,12 +562,12 @@ Installations are separated by tool, version, OS and architecture. Cache hits st
 
 Velopack keeps the existing selection order: explicit ToolVersion, restored Velopack dependency version, then an installed vpk if no version can be inferred. Selected versions use the persistent cache instead of the build output directory. SDK availability and build selection are controlled by the SDK setup below; add an older SDK when a tool requires its runtime.
 
-Linux shared builds also check/install zstd using apt-get (with sudo for non-root runners). This requires an Ubuntu/Debian-compatible runner and installation privileges when zstd is missing. For v0.1, legacy PATH discovery is retained across the existing tool roots, tolerating missing directories and paths containing spaces. Selected PowerShell/GitHub CLI installations take precedence.
+Linux shared builds also check/install zstd using apt-get (with sudo for non-root runners). This requires an Ubuntu/Debian-compatible runner and installation privileges when zstd is missing. For v0.1, legacy PATH discovery is retained across the existing tool roots, tolerating missing directories and paths containing spaces. Selected PowerShell/GitHub CLI installations take precedence. Discovery matches find -maxdepth 5, deduplicates against the inherited PATH, and omits optional directories when the combined PATH would exceed its safety budget. Omitted directories are reported with a warning.
 
 Consumer-owned workflows can use the same setup without the reusable workflow:
 
 ~~~yaml
-- uses: Amith211/Amith.Build/setup-tools@v0.1
+- uses: Amith211/Amith.Build/setup-tools@v0.1.1
   with:
     tool-cache-path: /opt/hostedtoolcache
     # powershell-tag: v7.7.0
@@ -606,7 +606,7 @@ The shared workflow exposes sdk-version and comma/newline-separated additional-s
 For consumer-owned workflows, use setup-tools first (PowerShell bootstrap), then setup-dotnet before configuring restore feeds and calling Plan:
 
 ~~~yaml
-- uses: Amith211/Amith.Build/setup-dotnet@v0.1
+- uses: Amith211/Amith.Build/setup-dotnet@v0.1.1
   with:
     sdk-version: auto
     additional-sdks: |
