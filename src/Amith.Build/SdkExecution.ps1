@@ -13,13 +13,19 @@ function Invoke-AmithSdkCacheLock {
     param([string]$Directory,[scriptblock]$Body)
     [void][IO.Directory]::CreateDirectory((Split-Path -Parent $Directory))
     $lock=$null;$deadline=[DateTime]::UtcNow.AddMinutes(10)
+    $lockWatch=[Diagnostics.Stopwatch]::StartNew();$lockNextReport=0
     while(-not $lock){
         try{$lock=[IO.File]::Open("$Directory.lock",[IO.FileMode]::OpenOrCreate,[IO.FileAccess]::ReadWrite,[IO.FileShare]::None)}
         catch [IO.IOException]{
+            if($lockWatch.Elapsed.TotalSeconds -ge $lockNextReport){
+                Write-Host ("[timing] Waiting for SDK cache lock {0} ({1:F1}s)" -f $Directory,$lockWatch.Elapsed.TotalSeconds)
+                $lockNextReport=$lockWatch.Elapsed.TotalSeconds+30
+            }
             if([DateTime]::UtcNow -ge $deadline){throw "Timed out waiting for SDK cache lock: $Directory"}
             Start-Sleep -Milliseconds 500
         }
     }
+    if($lockNextReport -gt 0){Write-Host ("[timing] Acquired SDK cache lock after {0:F3}s" -f $lockWatch.Elapsed.TotalSeconds)}
     try{& $Body}finally{$lock.Dispose()}
 }
 
@@ -100,7 +106,7 @@ function Get-AmithSdkSource {
                 }
             }catch{}
         }
-        $installed=Find-AmithInstalledSdk $Version
+        $installed=Invoke-AmithTimed "Find installed SDK $Version" {Find-AmithInstalledSdk $Version}
         if($installed){Write-Host "Reusing installed SDK $Version ($rid)";return @{Version=$Version;Root=$installed}}
         $asset=Get-AmithSdkArchive $Version $rid
         $attempt="$directory.attempt-$([guid]::NewGuid().ToString('N'))"
@@ -108,11 +114,13 @@ function Get-AmithSdkSource {
         try{
             $archive=Join-Path $attempt $(if($IsWindows){'sdk.zip'}else{'sdk.tar.gz'})
             Write-Host "Downloading SDK $Version ($rid)"
-            Invoke-WebRequest -Uri $asset.url -OutFile $archive -TimeoutSec 600 -ErrorAction Stop
-            if((Get-FileHash -LiteralPath $archive -Algorithm SHA512).Hash -ine [string]$asset.hash){throw "SDK $Version archive SHA512 mismatch."}
+            Invoke-AmithTimed "Download SDK $Version ($rid)" {Invoke-WebRequest -Uri $asset.url -OutFile $archive -TimeoutSec 600 -ErrorAction Stop}
+            if((Invoke-AmithTimed "Verify SDK $Version archive checksum" {(Get-FileHash -LiteralPath $archive -Algorithm SHA512).Hash}) -ine [string]$asset.hash){throw "SDK $Version archive SHA512 mismatch."}
             $unpack=Join-Path $attempt 'unpack';[void][IO.Directory]::CreateDirectory($unpack)
-            if($IsWindows){[IO.Compression.ZipFile]::ExtractToDirectory($archive,$unpack)}
-            else{Invoke-AmithNative tar @('-xzf',$archive,'-C',$unpack)}
+            Invoke-AmithTimed "Extract SDK $Version ($rid)" {
+                if($IsWindows){[IO.Compression.ZipFile]::ExtractToDirectory($archive,$unpack)}
+                else{Invoke-AmithNative tar @('-xzf',$archive,'-C',$unpack)}
+            }
             $dll=Join-Path $unpack "sdk/$Version/dotnet.dll"
             if(-not (Test-Path -LiteralPath $dll)){throw 'SDK archive did not contain the requested SDK.'}
             $null=Invoke-AmithNative (Get-AmithSdkExecutable $unpack) @('--list-sdks') -Capture
@@ -134,10 +142,16 @@ function Copy-AmithSdkSupportFiles {
                     if($version.Name -notmatch '^(\d+\.\d+)\.' -or $Matches[1] -notin $Channels){continue}
                     $target=Join-Path $Destination "$($item.Name)/$($package.Name)"
                     [void][IO.Directory]::CreateDirectory($target)
-                    Copy-Item -LiteralPath $version.FullName -Destination $target -Recurse -Force
+                    Invoke-AmithTimed "Copy SDK support $($item.Name)/$($package.Name)/$($version.Name) from $Source" {
+                        Copy-Item -LiteralPath $version.FullName -Destination $target -Recurse -Force
+                    }
                 }
             }
-        }else{Copy-Item -LiteralPath $item.FullName -Destination $Destination -Recurse -Force}
+        }else{
+            Invoke-AmithTimed "Copy SDK support $($item.Name) from $Source" {
+                Copy-Item -LiteralPath $item.FullName -Destination $Destination -Recurse -Force
+            }
+        }
     }
 }
 function Get-AmithSdkProfile {
@@ -147,54 +161,60 @@ function Get-AmithSdkProfile {
     $identity=(@($sourcesSorted|ForEach-Object{$_.Version}) -join ',')+'|'+(@($SdkVersions|Sort-Object) -join ',')
     $key=[Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($identity))).ToLowerInvariant()
     $directory=Join-Path (Get-AmithToolCacheRoot) "amith-build/dotnet/profiles/$rid/$key"
-    return Invoke-AmithSdkCacheLock $directory {
-        $marker=Join-Path $directory '.amith-ready.json'
-        $executable=Get-AmithSdkExecutable $directory
-        if((Test-Path -LiteralPath $marker) -and (Test-Path -LiteralPath $executable)){
+    return Invoke-AmithTimed "Prepare SDK profile $($key.Substring(0,12)) (SDKs: $($SdkVersions -join ', '))" {
+        Invoke-AmithSdkCacheLock $directory {
+            $marker=Join-Path $directory '.amith-ready.json'
+            $executable=Get-AmithSdkExecutable $directory
+            if((Test-Path -LiteralPath $marker) -and (Test-Path -LiteralPath $executable)){
+                try{
+                    $receipt=Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json -AsHashtable
+                    $valid=$receipt.HostHash -ceq (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
+                    foreach($version in $SdkVersions){
+                        $dll=Join-Path $directory "sdk/$version/dotnet.dll"
+                        $valid=$valid -and (Test-Path -LiteralPath $dll) -and $receipt.SdkHashes[$version] -ceq (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
+                    }
+                    if($valid){Write-Host "SDK profile cache hit ($rid)";return @{Root=$directory;Dotnet=$executable}}
+                }catch{}
+            }
+            $attempt="$directory.attempt-$([guid]::NewGuid().ToString('N'))"
+            [void][IO.Directory]::CreateDirectory($attempt)
             try{
-                $receipt=Get-Content -LiteralPath $marker -Raw|ConvertFrom-Json -AsHashtable
-                $valid=$receipt.HostHash -ceq (Get-FileHash -LiteralPath $executable -Algorithm SHA256).Hash
-                foreach($version in $SdkVersions){
-                    $dll=Join-Path $directory "sdk/$version/dotnet.dll"
-                    $valid=$valid -and (Test-Path -LiteralPath $dll) -and $receipt.SdkHashes[$version] -ceq (Get-FileHash -LiteralPath $dll -Algorithm SHA256).Hash
+                # Preserve runtime packs, native files and SDK support directories.
+                # Copy shared content once per source root, with the newest host last.
+                $seen=@{}
+                for($i=$sourcesSorted.Count-1;$i -ge 0;$i--){
+                    $source=$sourcesSorted[$i]
+                    if($seen.ContainsKey($source.Root)){continue}
+                    $seen[$source.Root]=$true
                 }
-                if($valid){Write-Host "SDK profile cache hit ($rid)";return @{Root=$directory;Dotnet=$executable}}
-            }catch{}
+                foreach($source in $sourcesSorted){
+                    if(-not $seen.ContainsKey($source.Root)){continue}
+                    $newest=@($sourcesSorted|Where-Object Root -eq $source.Root)[-1].Version
+                    if($source.Version -cne $newest){continue}
+                    $channels=@($Sources|ForEach-Object{(Get-AmithSdkVersionParts $_.Version).Channel}|Select-Object -Unique)
+                    Invoke-AmithTimed "Prepare support files from SDK $($source.Version) at $($source.Root)" {
+                        Copy-AmithSdkSupportFiles $source.Root $attempt $channels
+                    }
+                    [void]$seen.Remove($source.Root)
+                }
+                $hashes=@{}
+                foreach($version in $SdkVersions){
+                    $source=@($Sources|Where-Object Version -ceq $version)[0]
+                    $destination=Join-Path $attempt 'sdk';[void][IO.Directory]::CreateDirectory($destination)
+                    Invoke-AmithTimed "Copy compiler SDK $version from $($source.Root)" {
+                        Copy-Item -LiteralPath (Join-Path $source.Root "sdk/$version") -Destination $destination -Recurse -Force
+                    }
+                    $hashes[$version]=(Get-FileHash -LiteralPath (Join-Path $destination "$version/dotnet.dll") -Algorithm SHA256).Hash
+                }
+                $hostPath=Get-AmithSdkExecutable $attempt
+                $null=Invoke-AmithTimed 'Validate prepared SDK profile host' {Invoke-AmithNative $hostPath @('--list-sdks') -Capture}
+                @{HostHash=(Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash;SdkHashes=$hashes}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $attempt '.amith-ready.json')
+                Remove-AmithSdkCacheDirectory $directory
+                Move-Item -LiteralPath $attempt -Destination $directory
+            }finally{Remove-AmithSdkCacheDirectory $attempt}
+            Write-Host "Prepared SDK profile: $($SdkVersions -join ', ') ($rid)"
+            return @{Root=$directory;Dotnet=$executable}
         }
-        $attempt="$directory.attempt-$([guid]::NewGuid().ToString('N'))"
-        [void][IO.Directory]::CreateDirectory($attempt)
-        try{
-            # Preserve runtime packs, native files and SDK support directories.
-            # Copy shared content once per source root, with the newest host last.
-            $seen=@{}
-            for($i=$sourcesSorted.Count-1;$i -ge 0;$i--){
-                $source=$sourcesSorted[$i]
-                if($seen.ContainsKey($source.Root)){continue}
-                $seen[$source.Root]=$true
-            }
-            foreach($source in $sourcesSorted){
-                if(-not $seen.ContainsKey($source.Root)){continue}
-                $newest=@($sourcesSorted|Where-Object Root -eq $source.Root)[-1].Version
-                if($source.Version -cne $newest){continue}
-                $channels=@($Sources|ForEach-Object{(Get-AmithSdkVersionParts $_.Version).Channel}|Select-Object -Unique)
-                Copy-AmithSdkSupportFiles $source.Root $attempt $channels
-                [void]$seen.Remove($source.Root)
-            }
-            $hashes=@{}
-            foreach($version in $SdkVersions){
-                $source=@($Sources|Where-Object Version -ceq $version)[0]
-                $destination=Join-Path $attempt 'sdk';[void][IO.Directory]::CreateDirectory($destination)
-                Copy-Item -LiteralPath (Join-Path $source.Root "sdk/$version") -Destination $destination -Recurse -Force
-                $hashes[$version]=(Get-FileHash -LiteralPath (Join-Path $destination "$version/dotnet.dll") -Algorithm SHA256).Hash
-            }
-            $hostPath=Get-AmithSdkExecutable $attempt
-            $null=Invoke-AmithNative $hostPath @('--list-sdks') -Capture
-            @{HostHash=(Get-FileHash -LiteralPath $hostPath -Algorithm SHA256).Hash;SdkHashes=$hashes}|ConvertTo-Json -Depth 5|Set-Content (Join-Path $attempt '.amith-ready.json')
-            Remove-AmithSdkCacheDirectory $directory
-            Move-Item -LiteralPath $attempt -Destination $directory
-        }finally{Remove-AmithSdkCacheDirectory $attempt}
-        Write-Host "Prepared SDK profile: $($SdkVersions -join ', ') ($rid)"
-        return @{Root=$directory;Dotnet=$executable}
     }
 }
 
@@ -251,7 +271,10 @@ function Open-AmithSdkScope {
         }else{
             $global=Find-AmithGlobalJson $RootPath
             $bootstrapSelector=if($SdkVersion -eq 'auto' -and -not $global.Sdk.Count){'latest'}else{$SdkVersion}
-            $requirements=Resolve-AmithSdkRequirements -RootPath $RootPath -SdkVersion $bootstrapSelector -AdditionalSdks $AdditionalSdks
+            $requirements=Invoke-AmithTimed "Resolve bootstrap SDK requirements (selector: $bootstrapSelector; additional: $($AdditionalSdks -join ', '))" {
+                Resolve-AmithSdkRequirements -RootPath $RootPath -SdkVersion $bootstrapSelector -AdditionalSdks $AdditionalSdks
+            }
+            Write-Host "[timing] Bootstrap SDK availability required: $($requirements.InstallSdkVersions -join ', ')"
             $scope.Sources=@(foreach($version in $requirements.InstallSdkVersions){Get-AmithSdkSource $version})
             $versions=if($requirements.RequestedSdkVersion){@($requirements.RequestedSdkVersion)}else{@($requirements.InstallSdkVersions)}
             if($SdkVersion -eq 'auto' -and -not $global.Sdk.Count){
@@ -282,7 +305,10 @@ function Open-AmithSdkScope {
 function Complete-AmithSdkScope {
     param($Scope,[string[]]$TargetFrameworks,[string[]]$ProjectDirectories)
     if($Scope.Selector -eq 'auto' -and -not $Scope.GlobalPolicy){
-        $requirements=Resolve-AmithSdkRequirements -RootPath $Scope.Root -SdkVersion auto -AdditionalSdks $Scope.AdditionalSdks -TargetFrameworks $TargetFrameworks
+        $requirements=Invoke-AmithTimed "Resolve build SDK from frameworks: $(@($TargetFrameworks|Select-Object -Unique) -join ', ')" {
+            Resolve-AmithSdkRequirements -RootPath $Scope.Root -SdkVersion auto -AdditionalSdks $Scope.AdditionalSdks -TargetFrameworks $TargetFrameworks
+        }
+        Write-Host "[timing] Build SDK availability required: $($requirements.InstallSdkVersions -join ', '); selected: $($requirements.RequestedSdkVersion)"
         $sources=@(foreach($version in $requirements.InstallSdkVersions){Get-AmithSdkSource $version})
         $sdkProfile=Get-AmithSdkProfile $sources @($requirements.RequestedSdkVersion)
         $Scope.Execution=@{Root=$sdkProfile.Root;Dotnet=$sdkProfile.Dotnet;Version=$requirements.RequestedSdkVersion;Selector=$Scope.Selector;InstallSdkVersions=$requirements.InstallSdkVersions;Policies=@{}}

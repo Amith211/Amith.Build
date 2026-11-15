@@ -623,3 +623,10 @@ Resolve-AmithSdkRequirements -RootPath ./ -SdkVersion 10 -AdditionalSdks 8.0.x
 That preflight alone does not install or select an SDK. It returns RequestedSdkVersion, SelectionSource, BootstrapSdkVersion, SupportedSdkVersions, AdditionalSdkVersions, InstallSdkVersions and the discovered GlobalJson policy. RequiresGlobalJsonValidation marks results still requiring native host validation. Saved preflight/build plans contain machine paths and should stay with private/local build metadata.
 
 SDK setup does not install OS prerequisites, native compilers, workloads or credential providers. Add an older SDK when a test/tool requires its runtime; unsupported runtime dependencies still fail through the native tool. Previously saved plans without SDK execution metadata retain their earlier host-resolution behaviour; create a fresh plan to adopt SDK selection. Microsoft's [release metadata](https://github.com/dotnet/core/tree/main/release-notes) supplies versions, and the [.NET host's global.json rules](https://learn.microsoft.com/en-us/dotnet/core/tools/global-json) remain authoritative.
+
+
+### Planning diagnostics
+
+Planning and SDK setup print timestamped start/completion messages with elapsed seconds. These identify metadata requests, installed-SDK searches, SDK downloads/checksums/extraction, profile preparation, support/compiler directory copies, solution discovery and individual project evaluation. Cache hits remain visible, and contended SDK cache locks report waiting progress every 30 seconds.
+
+These messages are enabled by default and use the PowerShell information stream, preserving operation return values and failures. They log operation labels, SDK versions and filesystem paths rather than environment dumps, credentials or command arguments. A start message without its corresponding completion identifies the operation still running; the enclosing completion includes time spent in nested work. Additional installed SDKs can add profile-copy work even when no SDK download is needed.
