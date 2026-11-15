@@ -142,7 +142,10 @@ function Invoke-AmithPublish {
             if ((Test-Path -LiteralPath $directory) -and @(Get-ChildItem -LiteralPath $directory -Force).Count) {
                 throw 'Publish output is not empty; create a new plan instead of mixing build outputs.'
             }
-            $arguments = @('publish', $project.Path, '--runtime', $target.Runtime, '--framework', $target.Framework,
+            # A portable library reference can strip RuntimeIdentifier before an
+            # executable dependency is evaluated. RuntimeIdentifiers keeps the
+            # whole graph RID-aware, matching restore and build for this target.
+            $arguments = @('publish', $project.Path, '--runtime', $target.Runtime, "-p:RuntimeIdentifiers=$($target.Runtime)", '--framework', $target.Framework,
                 '--self-contained', ([string][bool]$project.SelfContained).ToLowerInvariant(),
                 "-p:PublishSingleFile=$(([string][bool]$project.SingleFile).ToLowerInvariant())",
                 "-p:IncludeAllContentForSelfExtract=$(([string][bool]$project.SelfExtract).ToLowerInvariant())", '--output', $directory,
@@ -151,7 +154,7 @@ function Invoke-AmithPublish {
             $originalHook = [string](Get-AmithValue $project 'OriginalPublishHook' '')
             if ($originalHook) { $arguments += "-p:AmithOriginalCustomAfterMicrosoftCommonTargets=$originalHook" }
             foreach ($argument in $project.PublishArguments) {
-                if ($argument -match '^(--output|-o|--runtime|-r|--configuration|-c)(=|$)' -or $argument -match '^[-/]p:(Version|PublishDir|PackageVersion|CustomAfterMicrosoftCommonTargets|AmithOriginalCustomAfterMicrosoftCommonTargets|AmithIncludeDevelopmentSettings)=') {
+                if ($argument -match '^(--output|-o|--runtime|-r|--configuration|-c)(=|$)' -or $argument -match '^[-/]p:(Version|RuntimeIdentifier|RuntimeIdentifiers|PublishDir|PackageVersion|CustomAfterMicrosoftCommonTargets|AmithOriginalCustomAfterMicrosoftCommonTargets|AmithIncludeDevelopmentSettings)=') {
                     throw 'PublishArguments cannot override the plan output, runtime, configuration or version.'
                 }
             }

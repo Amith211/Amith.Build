@@ -61,3 +61,61 @@ Console.WriteLine($"main={File.Exists(Path.Combine(AppContext.BaseDirectory,"app
         } finally {$zip.Dispose()}
     }
 }
+
+
+Check 'cross-runtime publishing keeps a transitive executable reference on the requested runtime' {
+    $root=Join-Path $testRoot 'runtime-reference-graph'
+    foreach($directory in @('Client','Bridge','Api')){[void][IO.Directory]::CreateDirectory((Join-Path $root $directory))}
+    Set-Content (Join-Path $root 'Directory.Build.props') @'
+<Project>
+  <PropertyGroup Condition="'$(TargetFramework)' != '' and !$(TargetFramework.Contains('-windows'))">
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+  </PropertyGroup>
+</Project>
+'@
+    Set-Content (Join-Path $root 'Client/Client.csproj') @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0-windows</TargetFramework><OutputType>Exe</OutputType><SelfContained>true</SelfContained><PublishSingleFile>true</PublishSingleFile><RuntimeIdentifier>win-x64</RuntimeIdentifier></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Bridge/Bridge.csproj" /></ItemGroup>
+</Project>
+'@
+    Set-Content (Join-Path $root 'Bridge/Bridge.csproj') @'
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework></PropertyGroup>
+  <ItemGroup><ProjectReference Include="../Api/Api.csproj" /></ItemGroup>
+</Project>
+'@
+    Set-Content (Join-Path $root 'Api/Api.csproj') @'
+<Project Sdk="Microsoft.NET.Sdk.Web">
+  <PropertyGroup><TargetFramework>net10.0</TargetFramework><OutputType>Exe</OutputType><SelfContained>true</SelfContained><PublishSingleFile>true</PublishSingleFile></PropertyGroup>
+</Project>
+'@
+    Set-Content (Join-Path $root 'Client/Program.cs') 'System.Console.WriteLine(BridgeMarker.Value);'
+    Set-Content (Join-Path $root 'Bridge/Bridge.cs') 'public static class BridgeMarker { public static string Value => ApiMarker.Value; }'
+    Set-Content (Join-Path $root 'Api/Program.cs') 'System.Console.WriteLine("runtime fixture"); public static class ApiMarker { public static string Value => "runtime fixture"; }'
+    # Force Linux RID inference on Windows too, making the cross-host regression
+    # reproducible on both CI platforms without running a foreign executable.
+    $projects=@(
+        @{Path='Client/Client.csproj';Runtimes=@('win-x64');PublishArguments=@('-p:NETCoreSdkPortableRuntimeIdentifier=linux-x64')}
+        @{Path='Api/Api.csproj';Runtimes=@('win-x64','linux-x64')}
+    )
+    $p=Invoke-AmithBuild -RootPath $root -Projects $projects -SdkVersion '10' -NoTests -Version '0.0.0-runtime-graph' -Stages Restore,Build,Publish,Archive
+    foreach($target in @(
+        @{Name='Client';Runtime='win-x64';Executable='Client.exe'},
+        @{Name='Api';Runtime='win-x64';Executable='Api.exe'},
+        @{Name='Api';Runtime='linux-x64';Executable='Api'}
+    )){
+        $artifact=@($p.Artifacts|Where-Object{$_.Kind -eq 'PublishDirectory' -and $_.Project -eq $target.Name -and $_.Runtime -eq $target.Runtime})
+        Assert-Equal 1 $artifact.Count
+        $executable=Join-Path $artifact[0].Path $target.Executable
+        Assert-True (Test-Path $executable)
+        $stream=[IO.File]::OpenRead($executable)
+        try{
+            $header=[byte[]]::new(4)
+            Assert-Equal 4 $stream.Read($header,0,4)
+            if($target.Runtime -like 'win-*'){Assert-Equal '4D-5A' ([BitConverter]::ToString($header,0,2))}
+            else{Assert-Equal '7F-45-4C-46' ([BitConverter]::ToString($header))}
+        }finally{$stream.Dispose()}
+    }
+    Assert-Equal 4 @($p.Artifacts|Where-Object Kind -eq Archive).Count
+}
