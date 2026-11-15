@@ -1,7 +1,7 @@
 function Get-AmithProjectMetadata {
     param([string] $Path, [string] $Configuration, [string] $Version)
     $properties = 'OutputType,IsTestProject,IsPackable,TargetFramework,TargetFrameworks,RuntimeIdentifier,RuntimeIdentifiers,UseWPF,UseWindowsForms,UsingMicrosoftNETSdkWeb,PackageId,AssemblyName,ProjectAssetsFile,CustomAfterMicrosoftCommonTargets'
-    $lines = @(Invoke-AmithNative dotnet @('msbuild', $Path, '-nologo', "-p:Configuration=$Configuration", "-p:Version=$Version", '-p:EnableWindowsTargeting=true', "-getProperty:$properties", '-getItem:PackageReference') -Capture)
+    $lines = @(Invoke-AmithTimed "Evaluate project $([IO.Path]::GetFileName($Path))" {Invoke-AmithNative dotnet @('msbuild', $Path, '-nologo', "-p:Configuration=$Configuration", "-p:Version=$Version", '-p:EnableWindowsTargeting=true', "-getProperty:$properties", '-getItem:PackageReference') -Capture})
     $text = $lines -join "`n"
     $match = [regex]::Match($text, '(?s)\{.*\}')
     if (-not $match.Success) { throw "MSBuild did not return evaluated project properties for $Path" }
@@ -14,7 +14,7 @@ function Get-AmithProjectMetadata {
 
 function Get-AmithSolutionProjects {
     param([string] $Solution)
-    $lines = @(Invoke-AmithNative dotnet @('sln', $Solution, 'list') -Capture)
+    $lines = @(Invoke-AmithTimed "List solution projects $([IO.Path]::GetFileName($Solution))" {Invoke-AmithNative dotnet @('sln', $Solution, 'list') -Capture})
     foreach ($line in $lines) {
         $relative = $line.Trim()
         if ($relative -match '\.(csproj|fsproj|vbproj)$') { Resolve-AmithPath $relative (Split-Path -Parent $Solution) }
@@ -149,7 +149,9 @@ function New-AmithBuildPlan {
     if ($configuration -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Configuration must be a simple MSBuild configuration name.' }
     $sdkSelector = if ($PSBoundParameters.ContainsKey('SdkVersion')) { $SdkVersion } else { [string](Get-AmithValue $config 'SdkVersion' 'auto') }
     $sdkAdditional = @(Get-AmithValue $config 'AdditionalSdks' @()) + @($AdditionalSdks)
-    $sdkScope = Open-AmithSdkScope $root $sdkSelector $sdkAdditional
+    $planningWatch=[Diagnostics.Stopwatch]::StartNew()
+    Write-Host "[timing] Planning started (SDK selector: $sdkSelector; additional SDKs: $($sdkAdditional -join ', '))"
+    $sdkScope = Invoke-AmithTimed "Initialize planning SDK (selector: $sdkSelector)" {Open-AmithSdkScope $root $sdkSelector $sdkAdditional}
     try {
         $discover = ConvertTo-AmithBoolean (Get-AmithValue $config 'Discover' $true)
         $entries = @(Get-AmithValue $config 'Projects' @()) + @($Projects)
@@ -215,8 +217,9 @@ function New-AmithBuildPlan {
         }
         if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
         $bootstrapVersion = if ($sdkScope.Execution) { $sdkScope.Execution.Version } else { '' }
-        $sdkExecution = Complete-AmithSdkScope $sdkScope @($planned | ForEach-Object { $_.Frameworks }) @($planned | ForEach-Object { Split-Path -Parent $_.Path })
+        $sdkExecution = Invoke-AmithTimed "Select build SDK for $($planned.Count) projects" {Complete-AmithSdkScope $sdkScope @($planned | ForEach-Object { $_.Frameworks }) @($planned | ForEach-Object { Split-Path -Parent $_.Path })}
         if ($sdkExecution -and $sdkExecution.Version -cne $bootstrapVersion) {
+            Write-Host "[timing] SDK changed from $bootstrapVersion to $($sdkExecution.Version); re-evaluating $($evaluations.Count) projects."
             # Read SDK-dependent defaults again under the SDK that will actually build.
             $planned = @()
             foreach ($evaluation in $evaluations) {
@@ -247,7 +250,13 @@ function New-AmithBuildPlan {
         Write-Host "Build plan: $($plan.PlanPath)"
         Write-Host ("Test policy: " + $(if ($testPolicy.NoTests) {'NoTests'} elseif ($testPolicy.SkipTests) {'SkipTests'} else {'Required'}))
         foreach ($project in $planned) { Write-Host ("  {0}: {1} [{2}]{3}" -f $project.Name, $project.Kind, (($project.Targets | ForEach-Object Runtime) -join ', '), $(if ($project.Pack) { ' Pack=true' } else { '' })) }
+        $planningWatch.Stop()
+        Write-Host ("[timing] Planning completed ({0:F3}s)" -f $planningWatch.Elapsed.TotalSeconds)
         return $plan
+    } catch {
+        $planningWatch.Stop()
+        Write-Host ("[timing] Planning failed ({0:F3}s)" -f $planningWatch.Elapsed.TotalSeconds)
+        throw
     } finally { Close-AmithSdkScope $sdkScope }
 }
 

@@ -5,6 +5,21 @@ $script:AmithSdkWorkingDirectory = ''
 # release. Schema identifiers are strings and independent of module/action tags.
 $script:AmithPlanSchemaVersion = '1alpha1'
 
+function Invoke-AmithTimed {
+    param([string]$Label,[scriptblock]$Operation)
+    $timingWatch=[Diagnostics.Stopwatch]::StartNew()
+    $timingCompleted=$false
+    Write-Host ("[timing] {0} START {1}" -f [DateTime]::UtcNow.ToString('o'),$Label)
+    try {
+        & $Operation
+        $timingCompleted=$true
+    } finally {
+        $timingWatch.Stop()
+        $timingStatus=if($timingCompleted){'DONE'}else{'FAILED'}
+        Write-Host ("[timing] {0} {1} {2} ({3:F3}s)" -f [DateTime]::UtcNow.ToString('o'),$timingStatus,$Label,$timingWatch.Elapsed.TotalSeconds)
+    }
+}
+
 function Get-AmithValue {
     param($Map, [string] $Name, $Default = $null)
     if ($Map -is [System.Collections.IDictionary]) {

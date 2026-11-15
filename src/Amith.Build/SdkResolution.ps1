@@ -3,7 +3,9 @@
 function Get-AmithDotNetJson {
     param([Parameter(Mandatory)][string]$Uri)
     try {
-        return Invoke-RestMethod -Uri $Uri -TimeoutSec 60 -MaximumRetryCount 2 -RetryIntervalSec 2 -ErrorAction Stop | ConvertTo-Json -Depth 80 | ConvertFrom-Json -AsHashtable -Depth 80
+        return Invoke-AmithTimed "Read .NET metadata $(([uri]$Uri).AbsolutePath)" {
+            Invoke-RestMethod -Uri $Uri -TimeoutSec 60 -MaximumRetryCount 2 -RetryIntervalSec 2 -ErrorAction Stop | ConvertTo-Json -Depth 80 | ConvertFrom-Json -AsHashtable -Depth 80
+        }
     } catch { throw "Could not read Microsoft .NET release metadata from $($Uri): $($_.Exception.Message)" }
 }
 

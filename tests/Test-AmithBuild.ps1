@@ -26,6 +26,28 @@ Check 'all PowerShell source parses' {
         $tokens=$null; $errors=$null; [void][Management.Automation.Language.Parser]::ParseFile($file.FullName,[ref]$tokens,[ref]$errors); Assert-Equal 0 $errors.Count
     }
 }
+Check 'timing logs preserve successful output and stay on the information stream' {
+    $records=@(& $module { Invoke-AmithTimed 'timing probe' { 'first'; @{Value=2} } } 6>&1)
+    $values=@($records|Where-Object {$_ -isnot [Management.Automation.InformationRecord]})
+    $messages=@($records|Where-Object {$_ -is [Management.Automation.InformationRecord]}|ForEach-Object ToString)
+    Assert-Equal 2 $values.Count
+    Assert-Equal 'first' $values[0]
+    Assert-Equal 2 $values[1].Value
+    Assert-Equal 2 $messages.Count
+    Assert-True ($messages[0] -match '\[timing\].*START timing probe')
+    Assert-True ($messages[1] -match '\[timing\].*DONE timing probe \([0-9.,]+s\)')
+}
+Check 'failed timing logs retain the original failure without logging its contents' {
+    $records=@(& $module {
+        try { Invoke-AmithTimed 'failure probe' { throw [InvalidOperationException]::new('private failure detail') } }
+        catch { $_.Exception.GetType().FullName }
+    } 6>&1)
+    $values=@($records|Where-Object {$_ -isnot [Management.Automation.InformationRecord]})
+    $messages=@($records|Where-Object {$_ -is [Management.Automation.InformationRecord]}|ForEach-Object ToString)
+    Assert-Equal @('System.InvalidOperationException') $values
+    Assert-True ($messages[-1] -match 'FAILED failure probe')
+    Assert-True (-not (($messages -join ' ') -match 'private failure detail'))
+}
 Check 'native nonzero exit stops immediately' { Assert-Throws { & $module { Invoke-AmithNative pwsh @('-NoProfile','-Command','exit 17') } } '*exit code 17*' }
 Check 'native output redacts explicitly supplied secrets' {
     $output = @(& $module { Invoke-AmithNative pwsh @('-NoProfile','-Command',"Write-Output 'not-a-real-secret'") -Capture -SensitiveValues @('not-a-real-secret') })
