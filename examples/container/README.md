@@ -35,7 +35,7 @@ the version tag and `latest`. Permit moving `latest` in Harbor's immutability
 rules. This opt-in also moves `latest` for prereleases and older release versions;
 it does not trigger a Kubernetes rollout.
 
-For reusable workflows, consume `Amith211/Amith.Build/.github/workflows/build.yml@v0.2.0-alpha.4`
+For reusable workflows, consume `Amith211/Amith.Build/.github/workflows/build.yml@v0.2.0`
 after that version has been validated and tagged. This change does not create a tag.
 
 For container-only execution, use `-BuildMode containers` locally or

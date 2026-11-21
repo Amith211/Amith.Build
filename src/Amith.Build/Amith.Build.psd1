@@ -9,9 +9,4 @@
     CmdletsToExport = @()
     VariablesToExport = @()
     AliasesToExport = @()
-    PrivateData = @{
-        PSData = @{
-            Prerelease = 'alpha.4'
-        }
-    }
 }
