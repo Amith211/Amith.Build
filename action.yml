@@ -2,7 +2,7 @@ name: Amith.Build stage
 description: Run a shared .NET build stage using a persisted build plan.
 inputs:
   stage:
-    description: Plan, Restore, Build, Test, Pack, Publish, Archive, Installer, Retain, or Release (comma-separated stages are supported).
+    description: Plan, Restore, Build, Test, Pack, Publish, Archive, Installer, Container, Retain, or Release (comma-separated stages are supported).
     required: true
   config:
     description: Optional project configuration relative to root; auto-discovery is used when omitted.
@@ -73,10 +73,22 @@ inputs:
   package-excludes:
     description: Additional newline-separated relative file globs for all application packages. Plan only.
     default: ''
+  container-builder:
+    description: Existing Buildx builder name for Container; otherwise uses AMITH_CONTAINER_BUILDER.
+    default: ''
   plan:
     description: Saved build plan, relative to the consumer workspace.
     default: '.amith-build/plan.json'
 outputs:
+  has-containers:
+    description: Whether the plan contains container images.
+    value: ${{ steps.stage.outputs.has_containers }}
+  container-release:
+    description: Whether registry publication is enabled in the plan.
+    value: ${{ steps.stage.outputs.container_release }}
+  container-registry:
+    description: Registry host used by the plan.
+    value: ${{ steps.stage.outputs.container_registry }}
   sdk-version:
     description: SDK selected for the persisted plan.
     value: ${{ steps.stage.outputs.sdk_version }}
@@ -123,6 +135,7 @@ runs:
         AMITH_INCLUDE_SYMBOLS: ${{ inputs.include-symbols }}
         AMITH_INCLUDE_DEVELOPMENT_SETTINGS: ${{ inputs.include-development-settings }}
         AMITH_PACKAGE_EXCLUDES: ${{ inputs.package-excludes }}
+        AMITH_CONTAINER_BUILDER: ${{ inputs.container-builder || env.AMITH_CONTAINER_BUILDER }}
         AMITH_PLAN: ${{ inputs.plan }}
       run: |
         $ErrorActionPreference = 'Stop'
@@ -165,4 +178,5 @@ runs:
                 $env:AMITH_VERSIONED_ARCHIVES -or [bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) {
           throw 'SDK, packaging, deployment and test-policy inputs must be supplied to the Plan stage; later stages reuse its selections.'
         }
+        if ($env:AMITH_CONTAINER_BUILDER) { $arguments.ContainerBuilder = $env:AMITH_CONTAINER_BUILDER }
         & (Join-Path $env:AMITH_ACTION_ROOT 'scripts/Invoke-AmithBuild.ps1') @arguments

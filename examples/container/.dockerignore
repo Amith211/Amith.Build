@@ -1,0 +1,6 @@
+**/bin
+**/obj
+.git
+.amith-build
+artifacts
+**/*.oci.tar

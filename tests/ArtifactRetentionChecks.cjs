@@ -16,11 +16,11 @@ const step = id => {
   assert.notEqual(index, -1, 'Missing workflow step ' + id);
   return { index, block: blocks[index], condition: field(blocks[index], 'if') };
 };
-function state({ release = false, installer = 'success', releaseOutcome = 'skipped',
+function state({ release = false, installer = 'success', container = 'success', releaseOutcome = 'skipped',
   retain = 'skipped', root = '', cancelled = false, previousSuccess = true,
   mode = 'auto', policy = 'success' } = {}) {
   return { inputs: { release, 'artifact-retention': mode }, cancelled, previousSuccess, steps: {
-    'retention-policy': { outcome: policy }, installer: { outcome: installer }, release: { outcome: releaseOutcome },
+    'retention-policy': { outcome: policy }, installer: { outcome: installer }, container: { outcome: container }, release: { outcome: releaseOutcome },
     retain: { outcome: retain, outputs: { 'retained-root': root } }
   } };
 }
@@ -41,7 +41,8 @@ function evaluate(condition, context) {
   });
 }
 test('release precedes conditional retention and upload without masking its failure', () => {
-  assert.ok(step('installer').index < step('release').index);
+  assert.ok(step('installer').index < step('container').index);
+  assert.ok(step('container').index < step('release').index);
   assert.ok(step('release').index < step('retain').index);
   assert.ok(step('retain').index < step('upload').index);
   assert.notEqual(field(step('release').block, 'continue-on-error'), 'true');
@@ -129,5 +130,13 @@ test('actual workflow validation rejects invalid modes and nonpositive or fracti
     });
     assert.ifError(result.error);
     assert.equal(result.status === 0, valid, mode + '/' + days + ': ' + result.stderr);
+  }
+});
+
+test('failed or skipped container packaging blocks retention in every mode', () => {
+  for (const mode of ['auto', 'always', 'never']) {
+    for (const container of ['failure', 'skipped', 'cancelled']) {
+      assert.equal(evaluate(step('retain').condition, state({ mode, container, previousSuccess: false })), false);
+    }
   }
 });

@@ -142,7 +142,8 @@ Explicit project definitions are also available through the `-Projects` API para
 | `Defaults` | Default per-project options, applied before project entries/overrides. |
 | `Projects` | Additional/explicit paths and project settings. |
 | `Overrides` | Ordered `Match` rules applied to selected projects. |
-| `Release` | Explicitly enabled remote release providers. |
+| `Containers` | Optional Dockerfile/context/image definitions for OCI container packaging. |
+| `Release` | Explicitly enabled remote release providers, including Containers. |
 
 Per-project settings are `Kind` (`Library`, `Desktop`, `Web`, `Console`, `Test`), `Name`, `Pack`, `Publish`, `Archive`, `Runtimes`, `Frameworks`, `TestPlatforms`, `SelfContained`, `SingleFile`, `SelfExtract`, `VersionedArchives`, `ArchiveFormats`, `IncludeSymbols`, `IncludeDevelopmentSettings`, `PackageExcludes`, `PublishArguments` and `Velopack`. `Exclude = $true` in an override skips that project root. `Publish = $false` keeps an application in the build while omitting its publish outputs; `Archive = $false` disables its archives independently. The artifact `Name` must be unique and contain letters, digits, dots, underscores or hyphens.
 
@@ -246,11 +247,12 @@ Plan -> Restore -> Build -> Test
                          -> Pack       (NuGet)
                          -> Publish -> Archive
                                     -> Installer (optional Velopack)
+                         -> Container  (optional OCI images)
              explicit Retain -> recorded packages for CI artifact retention
              explicit Release -> NuGet push and/or draft-first GitHub release
 ```
 
-A normal local invocation runs Restore, Build, Test, Pack, Publish, Archive and Installer. Inapplicable stages are no-ops. **Release is never part of the default invocation.** Omitting Version uses `0.0.0-local`; remote Release requires an explicit version.
+A normal local invocation runs Restore, Build, Test, Pack, Publish, Archive, Installer and Container. Inapplicable stages are no-ops. **Release is never part of the default invocation.** Omitting Version uses `0.0.0-local`; remote Release requires an explicit version.
 
 The current plan schema identifier is a string:
 
@@ -260,7 +262,9 @@ The current plan schema identifier is a string:
 
 Schema identifiers follow a Kubernetes-inspired convention without the leading `v`: `1alpha1`, `1beta1`, `1`, and eventually `2alpha1`, independently of module/action SemVer releases. The reader explicitly accepts the current identifier, including its exact case; it does not infer compatibility from ordering. Earlier numeric identifiers are unsupported and require regenerating the plan.
 
-**Unreleased development policy:** keep `1alpha1` unchanged, including through incompatible schema changes, until the first alpha version is released. Only changes after that release are candidates for a schema increment. During this development period, a matching identifier is not a guarantee that an older plan is compatible: regenerate plans after changing the tooling. Stable identifiers such as `"1"` will remain strings too.
+**Schema compatibility policy:** compatible optional additions retain the same schema identifier and preserve existing behaviour when omitted. Incompatible format or semantic changes require a new identifier (for example, `1alpha2`); maturity transitions also change it (for example, `1beta1` or `1`). This policy is independent of module/action release versions. New tooling must accept supported older plans within the same schema; older tooling is not guaranteed to understand newly introduced features. Plans from development snapshots before this compatibility baseline may require regeneration. Stable identifiers such as `"1"` remain strings too.
+
+The `0.2.0-alpha.1` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
 
 Preview selection without building, testing or contacting release services:
 
@@ -658,3 +662,146 @@ This changes only the shared workflow order and retention gates. Explicit local 
 The shared workflow accepts optional `source-ref` (branch, tag or commit) for an explicit source checkout. Omit it to build the calling workflow commit as before. This allows a corrected workflow to retry a release from the original signed tag without moving that tag. The plan and release checks use the checked-out source commit.
 
 GitHub draft verification resolves the release through `gh release view` and reads its raw asset IDs/digests by release ID. A draft may return 404 from the REST by-tag endpoint; published or mismatched releases are still rejected before Velopack upload.
+
+## Container images with remote BuildKit
+
+Container packaging is opt-in through root-level `Containers` definitions. Each
+entry owns a repository-local Dockerfile and source context; its multi-stage
+Dockerfile restores/compiles/publishes inside BuildKit. Normal runner Build/Test
+still execute, but runtime execution of the image is not checked. See the working
+[API example](examples/container/README.md).
+
+```powershell
+@{
+    Projects = @(@{ Path = 'src/Api/Api.csproj'; Publish = $false; Archive = $false })
+    Containers = @(@{
+        Name = 'api'
+        Context = '.'
+        Dockerfile = 'src/Api/Dockerfile'
+        Target = 'runtime' # Optional; default is the Dockerfile's final stage.
+        Image = 'harbor.example.com/applications/api'
+        Platforms = @('linux/amd64')
+        BuildArguments = @{ CONFIGURATION = 'Release' }
+        Secrets = @(@{ Id = 'nuget_config'; Source = 'NuGetRestoreSources' })
+    })
+    Release = @{ Containers = @{ Enabled = $true; TagAsLatest = $false } }
+}
+```
+
+`Context` defaults to `.` and `Dockerfile` to `Dockerfile`; both resolve from the
+same root as project paths and must exist inside the repository. Input paths
+cannot traverse symlinks/junctions. Container names and image repositories must
+be unique. `Image` is a lowercase registry/repository without a tag, digest or
+scheme. One registry per plan is supported, including an optional port.
+`Platforms` defaults to `linux/amd64`; Linux multi-platform images require a
+builder/Dockerfile able to build each requested platform. The workflow does not
+install QEMU or alter the shared builder's workers.
+
+`Tag` optionally overrides the image tag; otherwise the build version is used.
+Tags must be valid image tags other than `latest`. Amith.Build's existing canonical
+SemVer version policy still applies. `AMITH_VERSION` and `AMITH_SOURCE_COMMIT`
+build arguments are supplied automatically and cannot be overridden. Dockerfiles
+must consume them explicitly to set application versions. Non-secret
+`BuildArguments` and configuration references are stored in the saved plan;
+never put credentials in build arguments. Version/revision OCI labels are set by
+the stage. Keep generated artifacts and `.amith-build` out of the Docker context
+using `.dockerignore`.
+
+The default local stages now finish with `Container`; with no configured images
+it is a no-op and requires no Docker tools. Configured builds require successful
+Build/Test stages, including the existing explicit NoTests/SkipTests policies.
+They export OCI image-layout tarballs under the isolated output directory. No
+local Docker daemon is needed with a remote builder. The builder name is an
+execution input, not a saved plan setting:
+
+```powershell
+Invoke-AmithBuild -Version 1.2.3 -ContainerBuilder cluster
+Invoke-AmithBuildStage -PlanPath .amith-build/plan.json -Stage Container -ContainerBuilder cluster
+```
+
+`AMITH_CONTAINER_BUILDER` is the fallback; the composite action exposes
+`container-builder`. Local callers install Docker/Buildx and register their own
+builder. Dockerfile changes require a fresh plan. OCI descriptors, blob hashes
+and requested platforms are validated without extracting archive paths. Archives
+record their SHA256, image digest, source revision, Dockerfile hash and Buildx
+version. Archive file hashes and image digests are distinct identifiers.
+
+### Workflow and registry authentication
+
+The reusable workflow uses `docker/setup-buildx-action@v4` with the remote driver
+only when Plan reports images. `container-builder-endpoint` defaults to
+`tcp://buildkitd.arc-buildkit.svc:1234`; `container-buildx-version` optionally pins
+Buildx. These actions require a Node 24 compatible runner. Container workflows
+require Linux with Docker CLI already installed, and apt/sudo privileges if Skopeo
+is missing for a release. Other consumers retain their existing requirements.
+
+Optional workflow secrets are `CONTAINER_REGISTRY_USERNAME` and
+`CONTAINER_REGISTRY_PASSWORD`, supplied together. They authenticate the plan's
+registry for private base-image pulls and publication. Docker credentials use an
+isolated, job-scoped Docker configuration and normal login-action logout.
+Anonymous registry access also works. Release passes that Docker authentication
+file explicitly to Skopeo. Outside the workflow, use `REGISTRY_AUTH_FILE`, an
+existing `DOCKER_CONFIG/config.json`, or Skopeo's normal credential lookup.
+Private base registries on other hosts require a consumer-owned workflow.
+
+### Build secrets and package cache
+
+`Secrets` entries contain `Id`, `Source` and optionally `Environment`.
+`Source = 'Environment'` requires a named nonempty process environment variable;
+the value is passed as a BuildKit secret, never as a build argument.
+`Source = 'NuGetRestoreSources'` materializes the existing
+`AMITH_NUGET_RESTORE_SOURCES` JSON into a temporary, self-contained NuGet config,
+then mounts it under the supplied secret ID. The reusable workflow supplies its
+`NUGET_RESTORE_SOURCES` secret automatically. Only supplied HTTP(S) feeds are
+included, with a clear entry; host paths, credential providers and repository
+source mappings are not copied. Temporary secrets stay outside retained outputs
+and are removed after success/failure. Dockerfiles must mount them and must not
+copy or deliberately log their contents.
+
+Use the shared `bcs-nuget` cache mount only for mutually trusted builds. The
+runner's NuGet cache is separate. Cache mounts can be garbage-collected even on a
+persistent BuildKit volume, so restore/publish must remain correct with empty
+mounts. The example performs restore and publish within one cache-mounted RUN.
+Normal builder registration cleanup remains enabled; Amith.Build never prunes or
+stops the shared daemon.
+
+### Publication, latest and retention
+
+`Release.Containers.Enabled` enables container-only or mixed releases. Container
+always creates an OCI archive, even on release runs. Release never rebuilds:
+Skopeo copies the recorded archive with all platforms and digest preservation,
+then verifies the destination digest. Existing version tags with the same digest
+are accepted on retry; conflicting digests fail. Harbor immutability rules must
+protect version tags against concurrent writers. Per-tag progress is saved
+immediately so partial failures remain reviewable and retryable.
+
+`TagAsLatest` defaults to false. When enabled, all version tags are published and
+verified before any `latest` aliases move to the same image digests. This explicit
+choice applies to prereleases and older releases too. Updating an alias does not
+restart Kubernetes pods. Permit moving `latest` in the registry while keeping
+version tags immutable. Publication across images/providers is not transactional;
+a failure can leave some version tags or aliases published. A failed alias update
+fails Release and may be retried without rebuilding.
+
+OCI archives join the existing auto/always/never retention policy. Archive
+modification blocks retention and release. Rebuilding invalidates Container;
+repackaging containers invalidates prior Retain/Release eligibility while
+preserving publication history. Saved plans remain tied to the original host;
+restoring a retained archive alone is not a cross-runner release handoff.
+
+The workflow downloads archives from BuildKit and uploads their contents to the
+registry during Release. Allow runner disk space and transfer time for the full
+images. Deployment, Windows images, signing and container runtime smoke testing
+are outside this initial feature.
+
+Container-capable reusable workflows require the prepared `v0.2.0-alpha.1` release line.
+The workflow pins its own stages/setup actions to that version; publish the fixed
+tag after validation before consumers adopt it. No release tag is created by
+these scripts. Existing `v0.1.7` examples above describe the previous feature set.
+
+Container CI also runs `tests/Test-ContainerBuild.ps1 -ContainerBuilder <name>`
+against an isolated BuildKit builder, then `tests/Test-ContainerRegistry.ps1
+-ArchivePath <oci-tar> -Registry <test-registry>` against a disposable local
+registry. The latter publishes only the scratch fixture's test tags and verifies
+both `latest` and idempotent retries. Do not point that test at a production image
+repository. Neither check deploys or starts the built image.

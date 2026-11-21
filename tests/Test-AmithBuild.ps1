@@ -223,6 +223,18 @@ try {
         Assert-Equal 'Library' (@($p.Projects|Where-Object Name -eq Lib)[0].Kind)
         Assert-Equal 'Test' (@($p.Projects|Where-Object Name -eq Api.Tests)[0].Kind)
     }
+    Check 'container definitions and latest policy are resolved and saved by Plan' {
+        Set-Content -LiteralPath (Join-Path $fixture 'Dockerfile') -Value 'FROM scratch'
+        $config=Join-Path $fixture 'containers.psd1'
+        Set-Content -LiteralPath $config -Value '@{Solution=''Fixture.sln'';Containers=@(@{Name=''api'';Image=''harbor.example.com/project/api''});Release=@{Containers=@{Enabled=$true;TagAsLatest=$true}}}'
+        $p=New-AmithBuildPlan -ConfigPath $config -Version 1.2.3 -PlanPath (Join-Path $testRoot 'container-plan.json')
+        $saved=Read-Plan $p.PlanPath
+        Assert-Equal 1 $saved.Containers.Count;Assert-Equal '1.2.3' $saved.Containers[0].Tag
+        Assert-Equal (Join-Path $fixture 'Dockerfile') $saved.Containers[0].Dockerfile
+        Assert-True $saved.Release.Containers.TagAsLatest
+        Set-Content -LiteralPath $config -Value '@{Solution=''Fixture.sln'';Release=@{Containers=@{Enabled=$true}}}'
+        Assert-Throws {New-AmithBuildPlan -ConfigPath $config -Version 1.2.3 -PlanPath (Join-Path $testRoot 'invalid-container-plan.json')} '*no container images*'
+    }
     Check 'one runtime list produces both API targets and supported desktop targets' {
         $p=New-FixturePlan
         Assert-Equal @('win-x64','linux-x64') @(@($p.Projects|Where-Object Name -eq Api)[0].Targets|ForEach-Object Runtime)
@@ -641,6 +653,7 @@ if ($Integration) {
 }
 if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkResolutionIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkExecutionIntegrationChecks.ps1') }
 . (Join-Path $PSScriptRoot 'NuGetChecks.ps1')
+. (Join-Path $PSScriptRoot 'ContainerChecks.ps1')
 Write-Host "$script:passed checks passed. Test workspace: $testRoot"
 
 exit 0

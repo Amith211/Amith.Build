@@ -250,13 +250,18 @@ function New-AmithBuildPlan {
         $runId = [Guid]::NewGuid().ToString('N').Substring(0, 12)
         $outputBase = Resolve-AmithPath ([string](Get-AmithValue $config 'Output' 'artifacts')) $root
         $outputRoot = Join-Path (Join-Path $outputBase $Version) $runId
+        $containers = @(Get-AmithContainerPlans $config $root $Version)
+        $containerRelease = Get-AmithValue (Get-AmithValue $config 'Release' @{}) 'Containers' @{}
+        Assert-AmithContainerReleaseOptions $containerRelease
+        if ((ConvertTo-AmithBoolean (Get-AmithValue $containerRelease 'Enabled' $false)) -and -not $containers.Count) { throw 'Release.Containers is enabled but no container images are configured.' }
         $plan = @{
             SchemaVersion = $script:AmithPlanSchemaVersion; Root = $root; Solution = $Solution; Version = $Version; ExplicitVersion = $explicitVersion; SourceCommit = Get-AmithSourceCommit $root
             Configuration = $configuration; RunId = $runId; OutputRoot = $outputRoot; OutputBase = $outputBase; Projects = @($planned)
-            TestPolicy = $testPolicy; SdkExecution = $sdkExecution
+            TestPolicy = $testPolicy; SdkExecution = $sdkExecution; Containers = $containers
             Artifacts = @(); Stages = @{}; Release = Get-AmithValue $config 'Release' @{}
             PlanPath = Resolve-AmithPath $PlanPath $root
         }
+        foreach ($container in $containers) { Write-Host "  Container $($container.Name): $($container.Image):$($container.Tag) [$($container.Platforms -join ', ')]" }
         Write-AmithJson $plan $plan.PlanPath
         Write-Host "Build plan: $($plan.PlanPath)"
         Write-Host ("Test policy: " + $(if ($testPolicy.NoTests) {'NoTests'} elseif ($testPolicy.SkipTests) {'SkipTests'} else {'Required'}))

@@ -95,11 +95,11 @@ function Get-AmithPackageInput {
 function Invoke-AmithRetain {
     param($Plan)
     [void]$Plan.Remove('RetainedRoot')
-    $selected = @($Plan.Artifacts | Where-Object Kind -in @('Archive','Installer','NuGet','Symbols'))
+    $selected = @($Plan.Artifacts | Where-Object Kind -in @('Archive','Installer','NuGet','Symbols','ContainerArchive'))
     $root = Assert-AmithOutputPath $Plan (Join-Path $Plan.OutputRoot "retained/$([guid]::NewGuid().ToString('N'))")
     [void][IO.Directory]::CreateDirectory($root)
     foreach ($file in $selected) {
-        $producer = switch ($file.Kind) {Archive {'Archive'};Installer {'Installer'};default {'Pack'}}
+        $producer = switch ($file.Kind) {Archive {'Archive'};Installer {'Installer'};ContainerArchive {'Container'};default {'Pack'}}
         Assert-AmithStage $Plan $producer
         $path = Assert-AmithOutputPath $Plan $file.Path
         if (-not $file.SHA256 -or -not (Test-Path -LiteralPath $path -PathType Leaf) -or (Get-FileHash -LiteralPath $path -Algorithm SHA256).Hash -ne $file.SHA256) {
