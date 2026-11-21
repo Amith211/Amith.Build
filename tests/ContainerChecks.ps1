@@ -250,11 +250,13 @@ Check 'registry manifest hashing preserves exact UTF8 bytes and rejects auth net
         $expected='sha256:'+([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($probe.Output))).ToLowerInvariant())
         Assert-Equal $expected (& $module {Get-AmithRegistryDigest 'harbor.example.com/project/api:1.2.3'})
         $probe.ExitCode=1
-        foreach($message in @('unauthorized','x509: certificate signed by unknown authority','connection refused','unexpected 404 page not found')) {
+        foreach($message in @('unauthorized','x509: certificate signed by unknown authority','connection refused','unexpected 404 page not found','unknown: artifact project/other:1.2.3 not found','unknown: artifact project/api:1.2.30 not found','unauthorized: artifact project/api:1.2.3 not found')) {
             $probe.Error=$message
             Assert-Throws {& $module {Get-AmithRegistryDigest 'harbor.example.com/project/api:1.2.3'}} '*Could not inspect*'
         }
-        $probe.Error='manifest unknown'
-        Assert-Equal '' (& $module {Get-AmithRegistryDigest 'harbor.example.com/project/api:1.2.3'})
+        foreach($message in @('manifest unknown','unknown: artifact project/api:1.2.3 not found','time="2026-11-21T13:15:12Z" level=fatal msg="reading manifest 1.2.3 in harbor.example.com/project/api: unknown: artifact project/api:1.2.3 not found"')) {
+            $probe.Error=$message
+            Assert-Equal '' (& $module {Get-AmithRegistryDigest 'harbor.example.com/project/api:1.2.3'})
+        }
     } finally {& $module {param($body)Set-Item Function:script:Invoke-AmithRegistryInspect $body} $original}
 }
