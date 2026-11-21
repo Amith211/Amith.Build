@@ -264,7 +264,7 @@ Schema identifiers follow a Kubernetes-inspired convention without the leading `
 
 **Schema compatibility policy:** compatible optional additions retain the same schema identifier and preserve existing behaviour when omitted. Incompatible format or semantic changes require a new identifier (for example, `1alpha2`); maturity transitions also change it (for example, `1beta1` or `1`). This policy is independent of module/action release versions. New tooling must accept supported older plans within the same schema; older tooling is not guaranteed to understand newly introduced features. Plans from development snapshots before this compatibility baseline may require regeneration. Stable identifiers such as `"1"` remain strings too.
 
-The `0.2.0-alpha.1` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
+The `0.2.0-alpha.2` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
 
 Preview selection without building, testing or contacting release services:
 
@@ -644,15 +644,15 @@ A runner benchmark returned identical metadata across the CLI and direct entry p
 
 ### Workflow artifact retention
 
-The reusable workflow packages first, then performs the optional Release stage. It prepares and uploads a 14-day Actions artifact for build/validation-only runs, or as a fallback when Release fails after packaging succeeded. Successful releases skip the duplicate retained copy and use their release assets. Retention does not mask a failed Release result. Cancelled runs and earlier packaging failures do not initiate retention; failed or empty retention output is not uploaded.
+The reusable workflow packages first, then performs the optional Release stage. Actions artifact retention is disabled by default (`never`). Callers can opt into `auto` to retain packages for build/validation-only runs, or as a fallback when Release fails after packaging succeeded. Retained artifacts default to one day; callers can override the duration. Successful releases skip the duplicate retained copy and use their release assets. Retention does not mask a failed Release result. Cancelled runs and earlier packaging failures do not initiate retention; failed or empty retention output is not uploaded.
 
 Configure retention in the caller's reusable-workflow inputs:
 
 ```yaml
 with:
   version: ${{ inputs.version }}
-  artifact-retention: auto       # auto | always | never (default auto)
-  artifact-retention-days: 14     # default 14
+  artifact-retention: auto       # opt in: auto | always | never (default never)
+  artifact-retention-days: 1     # default 1
 ```
 
 `always` also retains packages after a successful release; `never` disables Actions package retention. All modes require successful packaging and respect cancellation. These inputs affect Actions artifacts only, not release assets or package contents. The duration must be a whole number from 1 to 400 and must not exceed the repository/organisation limit (public repositories allow up to 90 days). An invalid mode or duration fails before planning/building; a stricter repository limit is enforced by GitHub during upload.
@@ -794,7 +794,7 @@ registry during Release. Allow runner disk space and transfer time for the full
 images. Deployment, Windows images, signing and container runtime smoke testing
 are outside this initial feature.
 
-Container-capable reusable workflows require the prepared `v0.2.0-alpha.1` release line.
+Container-capable reusable workflows require `v0.2.0-alpha.1` or later; use `v0.2.0-alpha.2` for opt-in, one-day Actions artifact retention.
 The workflow pins its own stages/setup actions to that version; publish the fixed
 tag after validation before consumers adopt it. No release tag is created by
 these scripts. Existing `v0.1.7` examples above describe the previous feature set.

@@ -16,9 +16,11 @@ const step = id => {
   assert.notEqual(index, -1, 'Missing workflow step ' + id);
   return { index, block: blocks[index], condition: field(blocks[index], 'if') };
 };
+const inputDefault = name => field(source.split('      ' + name + ':\n')[1].split(/\n {6}\S/)[0], 'default');
+const retentionDefault = inputDefault('artifact-retention');
 function state({ release = false, installer = 'success', container = 'success', releaseOutcome = 'skipped',
   retain = 'skipped', root = '', cancelled = false, previousSuccess = true,
-  mode = 'auto', policy = 'success' } = {}) {
+  mode = retentionDefault, policy = 'success' } = {}) {
   return { inputs: { release, 'artifact-retention': mode }, cancelled, previousSuccess, steps: {
     'retention-policy': { outcome: policy }, installer: { outcome: installer }, container: { outcome: container }, release: { outcome: releaseOutcome },
     retain: { outcome: retain, outputs: { 'retained-root': root } }
@@ -49,19 +51,19 @@ test('release precedes conditional retention and upload without masking its fail
   assert.equal(evaluate(step('release').condition, state({ release: true })), true);
   assert.equal(evaluate(step('release').condition, state()), false);
 });
-test('build-only runs retain verified packages for fourteen days', () => {
-  assert.equal(evaluate(step('retain').condition, state()), true);
-  assert.match(source, /artifact-retention:\s*\n(?:.*\n)*?        default: auto/);
-  assert.match(source, /artifact-retention-days:\s*\n(?:.*\n)*?        default: 14/);
+test('auto opt-in retains verified build-only packages with a one-day default', () => {
+  assert.equal(evaluate(step('retain').condition, state({ mode: 'auto' })), true);
+  assert.equal(retentionDefault, 'never');
+  assert.equal(inputDefault('artifact-retention-days'), '1');
   assert.equal(field(step('upload').block, 'retention-days', 10), '${{ inputs.artifact-retention-days }}');
 });
 test('successful release runs skip the duplicate artifact copy', () => {
-  const context = state({ release: true, releaseOutcome: 'success' });
+  const context = state({ mode: 'auto', release: true, releaseOutcome: 'success' });
   assert.equal(evaluate(step('retain').condition, context), false);
   assert.equal(evaluate(step('upload').condition, context), false);
 });
-test('failed releases retain and upload despite the previous failed step', () => {
-  const context = state({ release: true, releaseOutcome: 'failure', previousSuccess: false });
+test('auto opt-in retains and uploads failed releases despite the previous failed step', () => {
+  const context = state({ mode: 'auto', release: true, releaseOutcome: 'failure', previousSuccess: false });
   assert.equal(evaluate(step('retain').condition, context), true);
   context.steps.retain = { outcome: 'success', outputs: { 'retained-root': '/verified/packages' } };
   assert.equal(evaluate(step('upload').condition, context), true);
@@ -92,11 +94,12 @@ test('always retains after either successful or failed releases and build-only r
   }
 });
 
-test('never disables retention regardless of release outcome', () => {
+test('default never disables retention regardless of release outcome', () => {
+  assert.equal(retentionDefault, 'never');
   for (const release of [false, true]) {
     for (const releaseOutcome of ['success', 'failure', 'skipped']) {
       assert.equal(evaluate(step('retain').condition, state({
-        mode: 'never', release, releaseOutcome, previousSuccess: releaseOutcome !== 'failure'
+        release, releaseOutcome, previousSuccess: releaseOutcome !== 'failure'
       })), false);
     }
   }
