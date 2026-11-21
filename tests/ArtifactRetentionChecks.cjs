@@ -20,9 +20,9 @@ const inputDefault = name => field(source.split('      ' + name + ':\n')[1].spli
 const retentionDefault = inputDefault('artifact-retention');
 function state({ release = false, installer = 'success', container = 'success', releaseOutcome = 'skipped',
   retain = 'skipped', root = '', cancelled = false, previousSuccess = true,
-  mode = retentionDefault, policy = 'success' } = {}) {
+  mode = retentionDefault, buildMode = 'all', policy = 'success' } = {}) {
   return { inputs: { release, 'artifact-retention': mode }, cancelled, previousSuccess, steps: {
-    'retention-policy': { outcome: policy }, installer: { outcome: installer }, container: { outcome: container }, release: { outcome: releaseOutcome },
+    plan: { outputs: { 'build-mode': buildMode } }, 'retention-policy': { outcome: policy }, installer: { outcome: installer }, container: { outcome: container }, release: { outcome: releaseOutcome },
     retain: { outcome: retain, outputs: { 'retained-root': root } }
   } };
 }
@@ -32,6 +32,7 @@ function evaluate(condition, context) {
   const hasStatusCheck = /\b(success|failure|cancelled|always)\s*\(/.test(expression);
   expression = expression.replace(/inputs\.artifact-retention/g, "inputs['artifact-retention']")
     .replace(/steps\.retention-policy/g, "steps['retention-policy']");
+  expression = expression.replace(/steps\.plan\.outputs\.build-mode/g, "steps.plan.outputs['build-mode']");
   expression = expression.replace(/steps\.retain\.outputs\.retained-root/g, "steps.retain.outputs['retained-root']");
   if (!hasStatusCheck) expression = 'success() && (' + expression + ')';
   return !!vm.runInNewContext('(' + expression + ')', {
@@ -141,5 +142,23 @@ test('failed or skipped container packaging blocks retention in every mode', () 
     for (const container of ['failure', 'skipped', 'cancelled']) {
       assert.equal(evaluate(step('retain').condition, state({ mode, container, previousSuccess: false })), false);
     }
+  }
+});
+
+test('container-only runs can retain packages when the installer step is intentionally skipped', () => {
+  for (const mode of ['auto', 'always']) {
+    assert.equal(evaluate(step('retain').condition, state({ mode, buildMode: 'containers', installer: 'skipped' })), true);
+    assert.equal(evaluate(step('retain').condition, state({ mode, buildMode: 'containers', installer: 'skipped', container: 'failure' })), false);
+  }
+  assert.equal(evaluate(step('retain').condition, state({ buildMode: 'containers', installer: 'skipped' })), false);
+});
+
+test('container-only workflow skips application packaging using the effective saved mode', () => {
+  for (const name of ['Pack NuGet libraries', 'Publish applications', 'Archive applications', 'Package configured installers']) {
+    const block = blocks.find(block => block.startsWith('name: ' + name + '\n'));
+    assert.ok(block, name);
+    const condition = field(block, 'if');
+    assert.equal(evaluate(condition, state()), true);
+    assert.equal(evaluate(condition, state({ buildMode: 'containers' })), false);
   }
 });

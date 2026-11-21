@@ -117,6 +117,7 @@ function Read-AmithPlan {
     if ($schemaVersion -isnot [string] -or $schemaVersion -cne $script:AmithPlanSchemaVersion) {
         throw "Unsupported build-plan schema '$schemaVersion'; expected '$script:AmithPlanSchemaVersion'. Regenerate the plan."
     }
+    if ((Get-AmithValue $plan 'BuildMode' 'all') -cnotin @('all','containers')) { throw 'Saved BuildMode must be all or containers. Regenerate the plan.' }
     return $plan
 }
 

@@ -1,6 +1,7 @@
 #requires -Version 7.4
 [CmdletBinding()]
 param([string] $ConfigPath, [string] $Solution, [string] $RootPath,
+      [ValidateSet('all','containers')][string] $BuildMode,
       [Alias('Project')][string[]] $ProjectPath, [string] $Version, [string[]] $Runtimes, [string[]] $Exclude, [hashtable[]] $Projects,
       [ValidateNotNullOrEmpty()][string[]] $PackProjects = @(), [ValidateNotNullOrEmpty()][string[]] $PackOnlyProjects = @(), [ValidateNotNullOrEmpty()][string[]] $ExcludePackProjects = @(),
           [switch] $PackAllLibraries, [switch] $NoPack,
@@ -18,6 +19,8 @@ $sdkExecution=if($plan.Contains('SdkExecution')){$plan.SdkExecution}else{$null}
 Write-Host "Artifacts: $($plan.OutputRoot)"
 
 if ($env:GITHUB_OUTPUT) {
+    $buildMode = & (Get-Module Amith.Build) { param($p) Get-AmithValue $p 'BuildMode' 'all' } $plan
+    Add-Content -LiteralPath $env:GITHUB_OUTPUT -Value "build_mode=$buildMode" -Encoding utf8
     $containers = @(& (Get-Module Amith.Build) { param($p) Get-AmithValue $p 'Containers' @() } $plan)
     $hasContainers = ($containers.Count -gt 0).ToString().ToLowerInvariant()
     $containerRelease = & (Get-Module Amith.Build) { param($p) (ConvertTo-AmithBoolean (Get-AmithValue (Get-AmithValue (Get-AmithValue $p 'Release' @{}) 'Containers' @{}) 'Enabled' $false)).ToString().ToLowerInvariant() } $plan

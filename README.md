@@ -264,7 +264,7 @@ Schema identifiers follow a Kubernetes-inspired convention without the leading `
 
 **Schema compatibility policy:** compatible optional additions retain the same schema identifier and preserve existing behaviour when omitted. Incompatible format or semantic changes require a new identifier (for example, `1alpha2`); maturity transitions also change it (for example, `1beta1` or `1`). This policy is independent of module/action release versions. New tooling must accept supported older plans within the same schema; older tooling is not guaranteed to understand newly introduced features. Plans from development snapshots before this compatibility baseline may require regeneration. Stable identifiers such as `"1"` remain strings too.
 
-The `0.2.0-alpha.2` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
+The `0.2.0-alpha.3` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
 
 Preview selection without building, testing or contacting release services:
 
@@ -639,7 +639,7 @@ These messages are enabled by default and use the PowerShell information stream,
 
 Planning evaluates projects with the MSBuild.dll belonging to the SDK already selected by the native host. This avoids CLI-dispatch overhead observed with SDK 11 on persistent runners. The same host, working directory, MSBuild properties and consumer imports are retained; SDK selection and global.json policy are unchanged. Restore, compilation, tests and publishing continue through the normal dotnet CLI.
 
-A runner benchmark returned identical metadata across the CLI and direct entry point, with approximately 9.8Ã¢â‚¬â€œ10.1 seconds per CLI query versus 0.85Ã¢â‚¬â€œ0.95 seconds directly. These measurements describe that runner, not a universal SDK performance guarantee. Cold SDK-profile construction is a separate cost and is still reported by the planning timings.
+A runner benchmark returned identical metadata across the CLI and direct entry point, with approximately 9.8ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ10.1 seconds per CLI query versus 0.85ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ0.95 seconds directly. These measurements describe that runner, not a universal SDK performance guarantee. Cold SDK-profile construction is a separate cost and is still reported by the planning timings.
 
 
 ### Workflow artifact retention
@@ -662,6 +662,76 @@ This changes only the shared workflow order and retention gates. Explicit local 
 The shared workflow accepts optional `source-ref` (branch, tag or commit) for an explicit source checkout. Omit it to build the calling workflow commit as before. This allows a corrected workflow to retry a release from the original signed tag without moving that tag. The plan and release checks use the checked-out source commit.
 
 GitHub draft verification resolves the release through `gh release view` and reads its raw asset IDs/digests by release ID. A draft may return 404 from the REST by-tag endpoint; published or mismatched releases are still rejected before Velopack upload.
+
+## Container-only builds and test suites
+
+The shared workflow accepts `build-mode: all | containers` (default `all`). Local
+commands accept `-BuildMode all|containers`; the configuration can also set
+`BuildMode`, which an explicit command option overrides. The reusable workflow's
+input defaults to `all` and takes precedence over configuration.
+
+Full mode preserves normal project discovery and runs all discovered tests.
+Suite definitions do not restrict its test selection. Container mode uses the
+union of the test suites referenced by all configured containers, deduplicates
+project paths, and restores/builds/tests only those roots. MSBuild builds their
+project-reference dependencies. Unrelated application and UI roots are not
+evaluated. Containers still compile their application through their Dockerfiles.
+
+For example, an AddressSearcher configuration can add:
+
+```powershell
+TestSuites = @{
+    Backend = @(
+        'tests/AddressSearch.Domain.Tests/AddressSearch.Domain.Tests.csproj'
+        'tests/AddressSearch.Data.Tests/AddressSearch.Data.Tests.csproj'
+    )
+    Ui = @('tests/AddressSearcher.Ui.Tests/AddressSearcher.Ui.Tests.csproj')
+    ApiSdk = @('tests/AddressSearcher.Api.Sdk.Tests/AddressSearcher.Api.Sdk.Tests.csproj')
+}
+
+Containers = @(
+    @{
+        Name = 'AddressSearcher-api'
+        Context = '.'
+        Dockerfile = 'src/AddressSearcher.Api/Dockerfile'
+        Target = 'final'
+        Image = 'registry.amith.co.uk/bcs/address-searcher-api'
+        Platforms = @('linux/amd64')
+        TestSuites = @('Backend')
+        # Keep the application's existing build arguments and secret references.
+    }
+)
+```
+
+Select the mode in the caller:
+
+```yaml
+with:
+  build-mode: containers
+  config: build/amith.build.psd1
+  version: ${{ inputs.version }}
+  release: true
+```
+
+Container mode skips the workflow's NuGet Pack, Publish, Archive and Installer
+steps. Explicit local invocations of those stages are successful no-ops. Release
+publishes only containers even if GitHub or NuGet destinations are enabled in the
+same configuration; `Release.Containers.Enabled` is still required. Existing
+artifact integrity checks, successful Build/Test gates, registry retries, optional
+`latest`, and retention policy still apply. No smoke tests are added.
+
+Each container needs a nonempty suite selection in container mode unless the
+saved `NoTests` or `SkipTests` policy explicitly permits a bypass. Unknown suites,
+missing or escaping project paths, selected non-test projects and excluded test
+roots fail planning. An intentionally empty suite is permitted only with that
+explicit bypass. `NoTests` remains invalid if the selected roots contain tests.
+A selected test suite with no host-compatible targets fails Test under the
+existing policy. Explicit `-Project` or NuGet package-selection options cannot be
+combined with container mode; use suite mappings to choose test roots.
+
+Suite paths are relative to the configuration's resolved repository root.
+Existing saved plans without `BuildMode` retain full-mode behavior. These inputs
+require `v0.2.0-alpha.3` or later.
 
 ## Container images with remote BuildKit
 
@@ -794,7 +864,7 @@ registry during Release. Allow runner disk space and transfer time for the full
 images. Deployment, Windows images, signing and container runtime smoke testing
 are outside this initial feature.
 
-Container-capable reusable workflows require `v0.2.0-alpha.1` or later; use `v0.2.0-alpha.2` for opt-in, one-day Actions artifact retention.
+Container-capable reusable workflows require `v0.2.0-alpha.1` or later; use `v0.2.0-alpha.3` for container-only builds and mapped test suites. Actions artifact retention defaults to opt-in and one day, introduced in `v0.2.0-alpha.2`.
 The workflow pins its own stages/setup actions to that version; publish the fixed
 tag after validation before consumers adopt it. No release tag is created by
 these scripts. Existing `v0.1.7` examples above describe the previous feature set.

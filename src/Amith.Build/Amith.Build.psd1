@@ -11,7 +11,7 @@
     AliasesToExport = @()
     PrivateData = @{
         PSData = @{
-            Prerelease = 'alpha.2'
+            Prerelease = 'alpha.3'
         }
     }
 }

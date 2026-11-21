@@ -4,6 +4,9 @@ inputs:
   stage:
     description: Plan, Restore, Build, Test, Pack, Publish, Archive, Installer, Container, Retain, or Release (comma-separated stages are supported).
     required: true
+  build-mode:
+    description: 'all (default) or containers; empty preserves configuration. Plan only.'
+    default: ''
   config:
     description: Optional project configuration relative to root; auto-discovery is used when omitted.
     default: ''
@@ -80,6 +83,9 @@ inputs:
     description: Saved build plan, relative to the consumer workspace.
     default: '.amith-build/plan.json'
 outputs:
+  build-mode:
+    description: Effective build mode stored in the plan.
+    value: ${{ steps.stage.outputs.build_mode }}
   has-containers:
     description: Whether the plan contains container images.
     value: ${{ steps.stage.outputs.has_containers }}
@@ -112,6 +118,7 @@ runs:
       env:
         AMITH_ACTION_ROOT: ${{ github.action_path }}
         AMITH_STAGES: ${{ inputs.stage }}
+        AMITH_BUILD_MODE: ${{ inputs.build-mode }}
         AMITH_CONFIG: ${{ inputs.config }}
         AMITH_ROOT: ${{ inputs.root }}
         AMITH_SOLUTION: ${{ inputs.solution }}
@@ -143,6 +150,7 @@ runs:
         $arguments = @{ Stages = $stages; PlanPath = Join-Path $env:GITHUB_WORKSPACE $env:AMITH_PLAN }
         if ($stages -icontains 'Plan') {
           $arguments.RootPath = Join-Path $env:GITHUB_WORKSPACE $env:AMITH_ROOT
+          if ($env:AMITH_BUILD_MODE) { $arguments.BuildMode = $env:AMITH_BUILD_MODE }
           if ($env:AMITH_CONFIG) { $arguments.ConfigPath = $env:AMITH_CONFIG }
           if ($env:AMITH_SOLUTION) { $arguments.Solution = $env:AMITH_SOLUTION }
           if ($env:AMITH_PROJECT) { $arguments.ProjectPath = @($env:AMITH_PROJECT) }
@@ -170,13 +178,13 @@ runs:
           if ($env:AMITH_VERSIONED_ARCHIVES) { $arguments.VersionedArchives = [bool]::Parse($env:AMITH_VERSIONED_ARCHIVES) }
           if ([bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) { $arguments.UnversionedArchives = $true }
         }
-        elseif ($env:AMITH_SDK_VERSION -or $env:AMITH_ADDITIONAL_SDKS -or $env:AMITH_PACK_PROJECTS -or $env:AMITH_PACK_ONLY_PROJECTS -or $env:AMITH_EXCLUDE_PACK_PROJECTS -or
+        elseif ($env:AMITH_BUILD_MODE -or $env:AMITH_SDK_VERSION -or $env:AMITH_ADDITIONAL_SDKS -or $env:AMITH_PACK_PROJECTS -or $env:AMITH_PACK_ONLY_PROJECTS -or $env:AMITH_EXCLUDE_PACK_PROJECTS -or
                 [bool]::Parse($env:AMITH_PACK_ALL_LIBRARIES) -or [bool]::Parse($env:AMITH_NO_PACK) -or
                 $env:AMITH_NO_TESTS -or $env:AMITH_SKIP_TESTS -or
                 $env:AMITH_SELF_CONTAINED -or $env:AMITH_SINGLE_FILE -or [bool]::Parse($env:AMITH_STANDALONE_SINGLE_FILE) -or
                 $env:AMITH_INCLUDE_SYMBOLS -or $env:AMITH_INCLUDE_DEVELOPMENT_SETTINGS -or $env:AMITH_PACKAGE_EXCLUDES -or
                 $env:AMITH_VERSIONED_ARCHIVES -or [bool]::Parse($env:AMITH_UNVERSIONED_ARCHIVES)) {
-          throw 'SDK, packaging, deployment and test-policy inputs must be supplied to the Plan stage; later stages reuse its selections.'
+          throw 'Build-mode, SDK, packaging, deployment and test-policy inputs must be supplied to the Plan stage; later stages reuse its selections.'
         }
         if ($env:AMITH_CONTAINER_BUILDER) { $arguments.ContainerBuilder = $env:AMITH_CONTAINER_BUILDER }
         & (Join-Path $env:AMITH_ACTION_ROOT 'scripts/Invoke-AmithBuild.ps1') @arguments

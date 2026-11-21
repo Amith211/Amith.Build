@@ -570,6 +570,7 @@ try {
     . (Join-Path $PSScriptRoot 'TestPolicyChecks.ps1')
     . (Join-Path $PSScriptRoot 'SdkResolutionChecks.ps1')
     . (Join-Path $PSScriptRoot 'SdkExecutionPlanChecks.ps1')
+    . (Join-Path $PSScriptRoot 'BuildSelectionChecks.ps1')
     Check 'rebuilding invalidates previous artifact and release gates' {
         $p=Invoke-AmithBuildStage $script:built.PlanPath Build;Assert-Equal 0 $p.Artifacts.Count;Assert-True (-not $p.Stages.Contains('Pack'))
     }
@@ -649,6 +650,21 @@ if ($Integration) {
             Assert-Equal $(if($IsWindows){2}else{1}) $p.TestResults.ExecutedTargets
             Assert-Equal 1 @($p.Artifacts|Where-Object Kind -eq NuGet).Count
         }
+    }
+}
+if ($Integration) {
+    Check 'real container-only selection builds and tests dependencies without evaluating unrelated UI projects' {
+        $root=Join-Path $testRoot 'runtime-regression'
+        [void][IO.Directory]::CreateDirectory((Join-Path $root 'BrokenUi'))
+        Set-Content -LiteralPath (Join-Path $root 'BrokenUi/Ui.csproj') -Value '<invalid-project'
+        Set-Content -LiteralPath (Join-Path $root 'Dockerfile') -Value 'FROM scratch'
+        $config=Join-Path $root 'container-only.psd1'
+        Set-Content -LiteralPath $config -Value "@{Discover=`$false;Projects=@('AApp/AApp.csproj','Lib/Lib.csproj','Tests/Tests.csproj','BrokenUi/Ui.csproj');TestSuites=@{Backend=@('Tests/Tests.csproj')};Containers=@(@{Name='api';Image='harbor.example.com/project/api';TestSuites=@('Backend')});Release=@{GitHub=@{Enabled=`$true};Containers=@{Enabled=`$true}}}"
+        $p=Invoke-AmithBuild -ConfigPath $config -BuildMode containers -Version '0.0.0-container-tests' -Stages Restore,Build,Test,Pack,Publish,Archive,Installer
+        Assert-Equal @('Tests') @($p.Projects | ForEach-Object Name)
+        Assert-Equal $(if($IsWindows){2}else{1}) $p.TestResults.ExecutedTargets
+        Assert-Equal 0 $p.Artifacts.Count
+        Assert-True (-not (Test-Path -LiteralPath (Join-Path $root 'BrokenUi/obj')))
     }
 }
 if ($Integration) { . (Join-Path $PSScriptRoot 'PackagingIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'ToolCacheIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkResolutionIntegrationChecks.ps1'); . (Join-Path $PSScriptRoot 'SdkExecutionIntegrationChecks.ps1') }

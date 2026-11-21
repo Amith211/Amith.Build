@@ -35,5 +35,13 @@ the version tag and `latest`. Permit moving `latest` in Harbor's immutability
 rules. This opt-in also moves `latest` for prereleases and older release versions;
 it does not trigger a Kubernetes rollout.
 
-For reusable workflows, consume `Amith211/Amith.Build/.github/workflows/build.yml@v0.2.0-alpha.2`
+For reusable workflows, consume `Amith211/Amith.Build/.github/workflows/build.yml@v0.2.0-alpha.3`
 after that version has been validated and tagged. This change does not create a tag.
+
+For container-only execution, use `-BuildMode containers` locally or
+`build-mode: containers` in a supporting reusable-workflow release. This example
+explicitly declares `NoTests`, so runner Restore/Build/Test record that bypass
+without compiling the API outside Docker. Real applications should define root
+`TestSuites` and reference them from each container to run relevant runner tests.
+Full mode continues to build its configured API root. Container-only mode never
+publishes GitHub release assets or NuGet packages. This mode requires `v0.2.0-alpha.3` or later.
