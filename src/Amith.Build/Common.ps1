@@ -1,8 +1,8 @@
 $script:AmithDotnetPath = ''
 $script:AmithSdkWorkingDirectory = ''
-# Keep this identifier fixed throughout unreleased development, even when the
-# format changes incompatibly. Reconsider increments only after the first alpha
-# release. Schema identifiers are strings and independent of module/action tags.
+# Schema identifiers are independent of module/action release versions.
+# Compatible optional additions keep this identifier and preserve existing defaults.
+# Incompatible format/semantic changes or maturity transitions require a new identifier.
 $script:AmithPlanSchemaVersion = '1alpha1'
 
 function Invoke-AmithTimed {

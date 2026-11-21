@@ -1,10 +1,10 @@
 function Invoke-AmithBuildStage {
     [CmdletBinding()]
     param([Parameter(Mandatory)][string] $PlanPath,
-          [Parameter(Mandatory)][ValidateSet('Restore','Build','Test','Pack','Publish','Archive','Installer','Retain','Release')][string] $Stage)
+          [Parameter(Mandatory)][ValidateSet('Restore','Build','Test','Pack','Publish','Archive','Installer','Container','Retain','Release')][string] $Stage, [string] $ContainerBuilder)
     $PlanPath = Resolve-AmithPath $PlanPath
     $plan = Read-AmithPlan $PlanPath
-    $Stage = @('Restore','Build','Test','Pack','Publish','Archive','Installer','Retain','Release') | Where-Object { $_ -ieq $Stage }
+    $Stage = @('Restore','Build','Test','Pack','Publish','Archive','Installer','Container','Retain','Release') | Where-Object { $_ -ieq $Stage }
     if ($Stage -in @('Restore', 'Build')) {
         # A rebuild invalidates prior artifact gates. Files are retained, but are
         # no longer eligible for release through this manifest.
@@ -13,13 +13,17 @@ function Invoke-AmithBuildStage {
         [void]$plan.Remove('VelopackPackages')
         [void]$plan.Remove('PackageInputs')
         [void]$plan.Remove('RetainedRoot')
-        foreach ($dependent in @('Test','Pack','Publish','Archive','Installer','Retain','Release')) { [void]$plan.Stages.Remove($dependent) }
+        foreach ($dependent in @('Test','Pack','Publish','Archive','Installer','Container','Retain','Release')) { [void]$plan.Stages.Remove($dependent) }
         if ($Stage -eq 'Restore') { [void]$plan.Stages.Remove('Build') }
     }
     if ($Stage -eq 'Test') { [void]$plan.Stages.Remove('Release') }
-    if ($Stage -in @('Pack','Publish','Archive','Installer')) {
+    if ($Stage -in @('Pack','Publish','Archive','Installer','Container')) {
         [void]$plan.Remove('RetainedRoot')
         [void]$plan.Stages.Remove('Retain')
+    }
+    if ($Stage -eq 'Container') {
+        $plan.Artifacts = @($plan.Artifacts | Where-Object Kind -ne 'ContainerArchive')
+        [void]$plan.Stages.Remove('Release')
     }
     $plan.Stages[$Stage] = @{ Status = 'Running'; StartedUtc = [DateTime]::UtcNow.ToString('o') }
     Write-AmithJson $plan $PlanPath
@@ -36,6 +40,7 @@ function Invoke-AmithBuildStage {
             Archive { Invoke-AmithArchive $plan }
             Installer { Invoke-AmithInstaller $plan }
             Retain { Invoke-AmithRetain $plan }
+            Container { Invoke-AmithContainer $plan $ContainerBuilder }
             Release { Invoke-AmithRelease $plan }
         }
         $plan.Stages[$Stage].Status = 'Succeeded'
@@ -64,9 +69,9 @@ function Invoke-AmithBuild {
           [switch] $IncludeSymbols, [switch] $IncludeDevelopmentSettings, [string[]] $PackageExcludes = @(),
           [switch] $NoTests, [switch] $SkipTests,
           [string] $SdkVersion, [string[]] $AdditionalSdks = @(),
-          [string] $PlanPath,
-          [ValidateSet('Plan','Restore','Build','Test','Pack','Publish','Archive','Installer','Retain','Release')]
-          [string[]] $Stages = @('Restore','Build','Test','Pack','Publish','Archive','Installer'), [switch] $PlanOnly)
+          [string] $PlanPath, [string] $ContainerBuilder,
+          [ValidateSet('Plan','Restore','Build','Test','Pack','Publish','Archive','Installer','Container','Retain','Release')]
+          [string[]] $Stages = @('Restore','Build','Test','Pack','Publish','Archive','Installer','Container'), [switch] $PlanOnly)
     $reusePlan = $PSBoundParameters.ContainsKey('PlanPath') -and -not $ConfigPath -and -not $Solution -and
         -not $Version -and -not $PSBoundParameters.ContainsKey('RootPath') -and $Projects.Count -eq 0 -and $ProjectPath.Count -eq 0 -and
         $Runtimes.Count -eq 0 -and $Exclude.Count -eq 0 -and $PackProjects.Count -eq 0 -and $PackOnlyProjects.Count -eq 0 -and
@@ -98,7 +103,7 @@ function Invoke-AmithBuild {
     if ($PlanOnly) { return $plan }
     foreach ($stage in $Stages) {
         if ($stage -ieq 'Plan') { continue }
-        $plan = Invoke-AmithBuildStage -PlanPath $plan.PlanPath -Stage $stage
+        $plan = Invoke-AmithBuildStage -PlanPath $plan.PlanPath -Stage $stage -ContainerBuilder $ContainerBuilder
     }
     return $plan
 }

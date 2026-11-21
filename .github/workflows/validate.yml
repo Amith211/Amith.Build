@@ -65,3 +65,37 @@ jobs:
       - name: Unit and integration checks
         shell: pwsh
         run: ./tests/Test-AmithBuild.ps1 -Integration
+
+  containers:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      registry:
+        image: registry:2
+        ports:
+          - 5000:5000
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Set up isolated validation builder
+        id: builder
+        uses: docker/setup-buildx-action@v4
+      - name: Verify real multi-platform OCI export and retention
+        id: image
+        shell: pwsh
+        env:
+          AMITH_TEST_BUILDER: ${{ steps.builder.outputs.name }}
+        run: ./tests/Test-ContainerBuild.ps1 -ContainerBuilder $env:AMITH_TEST_BUILDER
+      - name: Prepare local registry test tools
+        shell: bash
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y skopeo
+          sudo install -d /etc/containers/registries.conf.d
+          printf '[[registry]]\nlocation = "localhost:5000"\ninsecure = true\n' | sudo tee /etc/containers/registries.conf.d/amith-test.conf >/dev/null
+      - name: Verify real publication, latest and retry
+        shell: pwsh
+        env:
+          AMITH_TEST_ARCHIVE: ${{ steps.image.outputs.archive_path }}
+        run: ./tests/Test-ContainerRegistry.ps1 -ArchivePath $env:AMITH_TEST_ARCHIVE -Registry localhost:5000

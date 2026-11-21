@@ -5,7 +5,7 @@ function Assert-AmithReleaseArtifacts {
     Assert-AmithStage $Plan Test
     foreach ($artifact in $Plan.Artifacts) {
         $producer = switch ($artifact.Kind) {
-            NuGet { 'Pack' }; Symbols { 'Pack' }; PublishDirectory { 'Publish' }; Archive { 'Archive' }; Installer { 'Installer' }
+            NuGet { 'Pack' }; Symbols { 'Pack' }; PublishDirectory { 'Publish' }; Archive { 'Archive' }; Installer { 'Installer' }; ContainerArchive { 'Container' }
             default { throw 'Unknown artifact kind in the manifest.' }
         }
         Assert-AmithStage $Plan $producer
@@ -115,7 +115,10 @@ function Invoke-AmithRelease {
     $github = Get-AmithValue $Plan.Release 'GitHub' @{}
     $useNuGet = ConvertTo-AmithBoolean (Get-AmithValue $nuget 'Enabled' $false)
     $useGitHub = ConvertTo-AmithBoolean (Get-AmithValue $github 'Enabled' $false)
-    if (-not $useNuGet -and -not $useGitHub) { throw 'Enable Release.NuGet or Release.GitHub in the configuration before invoking Release.' }
+    $containers = Get-AmithValue $Plan.Release 'Containers' @{}
+    $useContainers = ConvertTo-AmithBoolean (Get-AmithValue $containers 'Enabled' $false)
+    if (-not $useNuGet -and -not $useGitHub -and -not $useContainers) { throw 'Enable Release.NuGet, Release.GitHub or Release.Containers in the configuration before invoking Release.' }
+    if ($useContainers) { Invoke-AmithContainerRelease $Plan $containers }
     if ($useNuGet) { Invoke-AmithNuGetRelease $Plan $nuget }
     if ($useGitHub) { Invoke-AmithGitHubRelease $Plan $github }
 }
