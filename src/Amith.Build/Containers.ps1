@@ -7,7 +7,7 @@ function Get-AmithContainerPlans {
     foreach ($entry in @(Get-AmithValue $Config 'Containers' @())) {
         if ($entry -isnot [Collections.IDictionary]) { throw 'Each Containers entry must be a map.' }
         foreach ($key in $entry.Keys) {
-            if ($key -notin @('Name','Context','Dockerfile','Target','Image','Platforms','Tag','BuildArguments','Secrets')) { throw "Unknown container setting: $key" }
+            if ($key -notin @('Name','Context','Dockerfile','Target','Image','Platforms','Tag','BuildArguments','Secrets','TestSuites')) { throw "Unknown container setting: $key" }
         }
         $name = [string](Get-AmithValue $entry 'Name' '')
         if ($name -notmatch '^[A-Za-z0-9][A-Za-z0-9._-]*$' -or -not $names.Add($name)) { throw 'Container names must be unique simple artifact names.' }
@@ -54,7 +54,7 @@ function Get-AmithContainerPlans {
         }
         @{
             Name=$name; Context=$context; Dockerfile=$dockerfile; DockerfileSHA256=(Get-FileHash -LiteralPath $dockerfile -Algorithm SHA256).Hash
-            Target=$target; Image=$image; Registry=$registry; Tag=$tag; Platforms=$platforms; BuildArguments=$arguments; Secrets=$secrets
+            Target=$target; Image=$image; Registry=$registry; Tag=$tag; Platforms=$platforms; BuildArguments=$arguments; Secrets=$secrets; TestSuites=@(Get-AmithValue $entry 'TestSuites' @())
         }
     }
 }

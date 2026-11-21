@@ -29,19 +29,24 @@ function Invoke-AmithBuildStage {
     Write-AmithJson $plan $PlanPath
     $sdkScope = $null
     try {
-        if (Get-AmithValue $plan 'SdkExecution' $null) { $sdkScope = Open-AmithSdkScope -RootPath $plan.Root -Execution $plan.SdkExecution }
+        $skipStage = (Get-AmithValue $plan 'BuildMode' 'all') -eq 'containers' -and $Stage -in @('Pack','Publish','Archive','Installer')
+        if (-not $skipStage -and (Get-AmithValue $plan 'SdkExecution' $null)) { $sdkScope = Open-AmithSdkScope -RootPath $plan.Root -Execution $plan.SdkExecution }
         Write-Host "Amith.Build: $Stage ($($plan.Version))"
-        switch ($Stage) {
-            Restore { Invoke-AmithRestore $plan }
-            Build { Invoke-AmithCompile $plan }
-            Test { Invoke-AmithTests $plan }
-            Pack { Invoke-AmithPack $plan }
-            Publish { Invoke-AmithPublish $plan }
-            Archive { Invoke-AmithArchive $plan }
-            Installer { Invoke-AmithInstaller $plan }
-            Retain { Invoke-AmithRetain $plan }
-            Container { Invoke-AmithContainer $plan $ContainerBuilder }
-            Release { Invoke-AmithRelease $plan }
+        if ($skipStage) {
+            Write-Host "Skipping $Stage in containers mode."
+        } else {
+            switch ($Stage) {
+                Restore { Invoke-AmithRestore $plan }
+                Build { Invoke-AmithCompile $plan }
+                Test { Invoke-AmithTests $plan }
+                Pack { Invoke-AmithPack $plan }
+                Publish { Invoke-AmithPublish $plan }
+                Archive { Invoke-AmithArchive $plan }
+                Installer { Invoke-AmithInstaller $plan }
+                Retain { Invoke-AmithRetain $plan }
+                Container { Invoke-AmithContainer $plan $ContainerBuilder }
+                Release { Invoke-AmithRelease $plan }
+            }
         }
         $plan.Stages[$Stage].Status = 'Succeeded'
     }
@@ -60,6 +65,7 @@ function Invoke-AmithBuildStage {
 function Invoke-AmithBuild {
     [CmdletBinding()]
     param([string] $ConfigPath, [string] $Solution, [string] $RootPath = (Get-Location).ProviderPath,
+          [ValidateSet('all','containers')][string] $BuildMode,
           [string] $Version, [string[]] $Runtimes = @(), [string[]] $Exclude = @(),
           [System.Collections.IDictionary[]] $Projects = @(), [Alias('Project')][string[]] $ProjectPath = @(),
           [ValidateNotNullOrEmpty()][string[]] $PackProjects = @(), [ValidateNotNullOrEmpty()][string[]] $PackOnlyProjects = @(), [ValidateNotNullOrEmpty()][string[]] $ExcludePackProjects = @(),
@@ -80,14 +86,14 @@ function Invoke-AmithBuild {
         -not $PSBoundParameters.ContainsKey('StandaloneSingleFile') -and
         -not $PSBoundParameters.ContainsKey('VersionedArchives') -and -not $PSBoundParameters.ContainsKey('UnversionedArchives') -and
         -not $PSBoundParameters.ContainsKey('IncludeSymbols') -and -not $PSBoundParameters.ContainsKey('IncludeDevelopmentSettings') -and
-        -not $PSBoundParameters.ContainsKey('NoTests') -and -not $PSBoundParameters.ContainsKey('SkipTests') -and
+        -not $PSBoundParameters.ContainsKey('BuildMode') -and -not $PSBoundParameters.ContainsKey('NoTests') -and -not $PSBoundParameters.ContainsKey('SkipTests') -and
         -not $PSBoundParameters.ContainsKey('SdkVersion') -and $AdditionalSdks.Count -eq 0 -and
         $PackageExcludes.Count -eq 0 -and (Test-Path -LiteralPath (Resolve-AmithPath $PlanPath))
     if ($reusePlan) { $plan = Read-AmithPlan (Resolve-AmithPath $PlanPath) }
     else {
         $arguments = @{ RootPath = $RootPath; Runtimes = $Runtimes; Exclude = $Exclude; Projects = $Projects; ProjectPath = $ProjectPath
             PackAllLibraries = $PackAllLibraries; NoPack = $NoPack }
-        foreach ($option in @('SelfContained','SingleFile','StandaloneSingleFile','VersionedArchives','UnversionedArchives','IncludeSymbols','IncludeDevelopmentSettings','NoTests','SkipTests')) {
+        foreach ($option in @('SelfContained','SingleFile','StandaloneSingleFile','VersionedArchives','UnversionedArchives','IncludeSymbols','IncludeDevelopmentSettings','NoTests','SkipTests','BuildMode')) {
             if ($PSBoundParameters.ContainsKey($option)) { $arguments[$option] = $PSBoundParameters[$option] }
         }
         if ($PSBoundParameters.ContainsKey('SdkVersion')) { $arguments.SdkVersion = $SdkVersion }

@@ -9,6 +9,10 @@ on:
         description: 'Optional source branch, tag or commit to build; empty checks out the calling workflow commit.'
         type: string
         default: ''
+      build-mode:
+        description: 'all (default) or containers; containers builds mapped test projects and container images only.'
+        type: string
+        default: all
       config:
         type: string
         default: ''
@@ -160,7 +164,7 @@ jobs:
       contents: write
     steps:
       - name: Register runner diagnostics
-        uses: Amith211/Amith.Build/runner-diagnostics@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build/runner-diagnostics@v0.2.0-alpha.3
         with:
           keep-runner-alive: ${{ inputs.keep-runner-alive }}
           keep-runner-alive-minutes: ${{ inputs.keep-runner-alive-minutes }}
@@ -170,7 +174,7 @@ jobs:
           ref: ${{ inputs.source-ref || github.sha }}
           persist-credentials: false
       - name: Ensure Linux compression tools
-        if: runner.os == 'Linux'
+        if: runner.os == 'Linux' && inputs.build-mode != 'containers'
         shell: bash
         run: |
           if ! command -v zstd >/dev/null 2>&1; then
@@ -182,7 +186,7 @@ jobs:
           fi
           zstd --version
       - name: Set up shared build tools
-        uses: Amith211/Amith.Build/setup-tools@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build/setup-tools@v0.2.0-alpha.3
         with:
           powershell-tag: ${{ inputs.powershell-tag }}
           gh-version: ${{ inputs.gh-version }}
@@ -190,9 +194,11 @@ jobs:
       - name: Validate SDK inputs
         shell: pwsh
         env:
+          AMITH_BUILD_MODE: ${{ inputs.build-mode }}
           AMITH_SDK: ${{ inputs.sdk-version }}
           AMITH_LEGACY_SDK: ${{ inputs.dotnet-version }}
         run: |
+          if ($env:AMITH_BUILD_MODE -cnotin @('all','containers')) { throw 'build-mode must be all or containers.' }
           if ($env:AMITH_SDK -and $env:AMITH_LEGACY_SDK) { throw 'Use sdk-version or its legacy dotnet-version alias, not both.' }
       - name: Validate artifact retention inputs
         id: retention-policy
@@ -209,19 +215,20 @@ jobs:
             throw 'artifact-retention-days must be a whole number between 1 and 400, within the repository/organisation retention limit.'
           }
       - name: Bootstrap .NET SDKs
-        uses: Amith211/Amith.Build/setup-dotnet@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build/setup-dotnet@v0.2.0-alpha.3
         with:
           sdk-version: ${{ inputs.sdk-version || inputs.dotnet-version || 'auto' }}
           additional-sdks: ${{ inputs.additional-sdks }}
       - name: Configure NuGet restore feeds
-        uses: Amith211/Amith.Build/setup-nuget@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build/setup-nuget@v0.2.0-alpha.3
         env:
           AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
       - name: Plan
         id: plan
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Plan
+          build-mode: ${{ inputs.build-mode }}
           config: ${{ inputs.config }}
           solution: ${{ inputs.solution }}
           project: ${{ inputs.project }}
@@ -292,39 +299,43 @@ jobs:
           endpoint: ${{ inputs.container-builder-endpoint }}
           version: ${{ inputs.container-buildx-version }}
       - name: Restore
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Restore
       - name: Build
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Build
       - name: Test
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Test
       - name: Pack NuGet libraries
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        if: steps.plan.outputs.build-mode != 'containers'
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Pack
       - name: Publish applications
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        if: steps.plan.outputs.build-mode != 'containers'
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Publish
       - name: Archive applications
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        if: steps.plan.outputs.build-mode != 'containers'
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Archive
       - name: Package configured installers
+        if: steps.plan.outputs.build-mode != 'containers'
         id: installer
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         env:
           GH_TOKEN: ${{ secrets.RELEASE_TOKEN || github.token }}
         with:
           stage: Installer
       - name: Package container images
         id: container
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         env:
           AMITH_NUGET_RESTORE_SOURCES: ${{ secrets.NUGET_RESTORE_SOURCES }}
         with:
@@ -333,7 +344,7 @@ jobs:
       - name: Release
         id: release
         if: inputs.release
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         env:
           NUGET_SOURCE_URL: ${{ secrets.NUGET_SOURCE_URL }}
           NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
@@ -342,8 +353,8 @@ jobs:
           stage: Release
       - name: Select recorded artifacts for retention
         id: retain
-        if: ${{ !cancelled() && steps.retention-policy.outcome == 'success' && steps.installer.outcome == 'success' && steps.container.outcome == 'success' && (inputs.artifact-retention == 'always' || (inputs.artifact-retention == 'auto' && (!inputs.release || steps.release.outcome == 'failure'))) }}
-        uses: Amith211/Amith.Build@v0.2.0-alpha.2
+        if: ${{ !cancelled() && steps.retention-policy.outcome == 'success' && (steps.installer.outcome == 'success' || steps.plan.outputs.build-mode == 'containers') && steps.container.outcome == 'success' && (inputs.artifact-retention == 'always' || (inputs.artifact-retention == 'auto' && (!inputs.release || steps.release.outcome == 'failure'))) }}
+        uses: Amith211/Amith.Build@v0.2.0-alpha.3
         with:
           stage: Retain
       - name: Retain packaged artifacts

@@ -108,6 +108,7 @@ function Get-AmithProjectPlan {
 function New-AmithBuildPlan {
     [CmdletBinding()]
     param([string] $ConfigPath, [string] $Solution, [string] $RootPath = (Get-Location).ProviderPath,
+          [ValidateSet('all','containers')][string] $BuildMode,
           [string] $Version, [string[]] $Runtimes = @(), [string[]] $Exclude = @(),
           [System.Collections.IDictionary[]] $Projects = @(), [Alias('Project')][string[]] $ProjectPath = @(),
           [ValidateNotNullOrEmpty()][string[]] $PackProjects = @(), [ValidateNotNullOrEmpty()][string[]] $PackOnlyProjects = @(), [ValidateNotNullOrEmpty()][string[]] $ExcludePackProjects = @(),
@@ -156,6 +157,17 @@ function New-AmithBuildPlan {
     $explicitVersion = -not [string]::IsNullOrWhiteSpace($Version)
     if (-not $explicitVersion) { $Version = [string](Get-AmithValue $config 'Version' '0.0.0-local'); $explicitVersion = $config.ContainsKey('Version') }
     Assert-AmithVersion $Version
+    if (-not $PSBoundParameters.ContainsKey('BuildMode')) { $BuildMode = [string](Get-AmithValue $config 'BuildMode' 'all') }
+    if ($BuildMode -cnotin @('all','containers')) { throw 'BuildMode must be all or containers.' }
+    $containers = @(Get-AmithContainerPlans $config $root $Version)
+    $suites = Get-AmithTestSuites $config $root
+    $containerTests = @(Get-AmithContainerTestProjects $containers $suites $testPolicy $BuildMode)
+    if ($BuildMode -eq 'containers') {
+        if (-not $containers.Count) { throw 'BuildMode containers requires at least one configured container.' }
+        if ($ProjectPath.Count -or $PackProjects.Count -or $PackOnlyProjects.Count -or $ExcludePackProjects.Count -or $PackAllLibraries) {
+            throw 'BuildMode containers uses container TestSuites; project and NuGet packaging selections cannot be combined with it.'
+        }
+    }
     $configuration = [string](Get-AmithValue $config 'Configuration' 'Release')
     if ($configuration -notmatch '^[A-Za-z0-9_.-]+$') { throw 'Configuration must be a simple MSBuild configuration name.' }
     $sdkSelector = if ($PSBoundParameters.ContainsKey('SdkVersion')) { $SdkVersion } else { [string](Get-AmithValue $config 'SdkVersion' 'auto') }
@@ -183,6 +195,19 @@ function New-AmithBuildPlan {
         }
         if ($Runtimes.Count -eq 0) { $Runtimes = @(Get-AmithValue $config 'Runtimes' @()) }
         $exclusions = @(Get-AmithValue $config 'Exclude' @()) + @($Exclude)
+        if ($BuildMode -eq 'containers') {
+            # Preserve configured settings only for the selected test roots.
+            $selected = @()
+            foreach ($path in $containerTests) {
+                $definition = @{ Path = $path }
+                foreach ($entry in $entries) {
+                    if ($entry -is [string]) { $entry = @{ Path = $entry } }
+                    if ((Resolve-AmithPath ([string](Get-AmithValue $entry 'Path' '')) $root) -eq $path) { $definition = Merge-AmithProjectSettings $definition $entry }
+                }
+                $selected += $definition
+            }
+            $entries = $selected; $discover = $false; $Solution = ''
+        }
         $definitions = @{}
         if ($discover) {
             if (-not $Solution) { $Solution = [string](Get-AmithValue $config 'Solution' '') }
@@ -226,7 +251,7 @@ function New-AmithBuildPlan {
             $evaluations += @{Path=$path;Settings=$settings}
             $planned += Get-AmithProjectPlan $path $settings $root $configuration $Runtimes $Version $deploymentOverrides $sdkScope.Execution
         }
-        if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
+        if ($planned.Count -eq 0 -and $BuildMode -ne 'containers') { throw 'No projects remain in the build plan.' }
         $bootstrapVersion = if ($sdkScope.Execution) { $sdkScope.Execution.Version } else { '' }
         $sdkExecution = Invoke-AmithTimed "Select build SDK for $($planned.Count) projects" {Complete-AmithSdkScope $sdkScope @($planned | ForEach-Object { $_.Frameworks }) @($planned | ForEach-Object { Split-Path -Parent $_.Path })}
         if ($sdkExecution -and $sdkExecution.Version -cne $bootstrapVersion) {
@@ -242,7 +267,12 @@ function New-AmithBuildPlan {
             }
         }
         Assert-AmithNoTestsDeclaration $planned $testPolicy
-        if ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
+        if ($BuildMode -eq 'containers') {
+            if ($planned.Count -ne $containerTests.Count) { throw 'Container test selection was excluded from the plan. Remove the exclusion or correct TestSuites.' }
+            foreach ($project in $planned) {
+                if ($project.Kind -ne 'Test') { throw "TestSuites selected a non-test project: $($project.RelativePath)" }
+            }
+        } elseif ($planned.Count -eq 0) { throw 'No projects remain in the build plan.' }
         $duplicates = @($planned | Group-Object Name | Where-Object Count -gt 1)
         if ($duplicates.Count) { throw 'Duplicate artifact names; supply unique Name overrides for those projects.' }
         Set-AmithPackSelection -Projects $planned -PackProjects $PackProjects -PackOnlyProjects $PackOnlyProjects `
@@ -250,13 +280,13 @@ function New-AmithBuildPlan {
         $runId = [Guid]::NewGuid().ToString('N').Substring(0, 12)
         $outputBase = Resolve-AmithPath ([string](Get-AmithValue $config 'Output' 'artifacts')) $root
         $outputRoot = Join-Path (Join-Path $outputBase $Version) $runId
-        $containers = @(Get-AmithContainerPlans $config $root $Version)
         $containerRelease = Get-AmithValue (Get-AmithValue $config 'Release' @{}) 'Containers' @{}
         Assert-AmithContainerReleaseOptions $containerRelease
         if ((ConvertTo-AmithBoolean (Get-AmithValue $containerRelease 'Enabled' $false)) -and -not $containers.Count) { throw 'Release.Containers is enabled but no container images are configured.' }
         $plan = @{
             SchemaVersion = $script:AmithPlanSchemaVersion; Root = $root; Solution = $Solution; Version = $Version; ExplicitVersion = $explicitVersion; SourceCommit = Get-AmithSourceCommit $root
             Configuration = $configuration; RunId = $runId; OutputRoot = $outputRoot; OutputBase = $outputBase; Projects = @($planned)
+            BuildMode = $BuildMode; TestSuites = $suites
             TestPolicy = $testPolicy; SdkExecution = $sdkExecution; Containers = $containers
             Artifacts = @(); Stages = @{}; Release = Get-AmithValue $config 'Release' @{}
             PlanPath = Resolve-AmithPath $PlanPath $root
