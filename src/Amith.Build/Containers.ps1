@@ -277,6 +277,11 @@ function Get-AmithRegistryDigest {
     if ($result.ExitCode -ne 0) {
         # Authentication, TLS and network errors must never mean "absent".
         if ($result.Error -match '(?i)manifest unknown|manifest_unknown|name unknown|name_unknown') { return '' }
+        # Harbor uses UNKNOWN for an absent artifact. Match the exact requested
+        # repository/tag rather than treating arbitrary 404 or auth errors as absent.
+        $repositoryReference = $Reference.Substring($Reference.IndexOf('/') + 1)
+        $harborMissing = '(?i:unknown:\s+artifact\s+)' + [regex]::Escape($repositoryReference) + '(?i:\s+not found)(?:"|\s*$)'
+        if ($result.Error -cmatch $harborMissing) { return '' }
         throw 'Could not inspect the registry image. Check authentication, TLS and connectivity.'
     }
     return 'sha256:'+([Convert]::ToHexString([Security.Cryptography.SHA256]::HashData([Text.Encoding]::UTF8.GetBytes($result.Output))).ToLowerInvariant())
