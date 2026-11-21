@@ -264,7 +264,7 @@ Schema identifiers follow a Kubernetes-inspired convention without the leading `
 
 **Schema compatibility policy:** compatible optional additions retain the same schema identifier and preserve existing behaviour when omitted. Incompatible format or semantic changes require a new identifier (for example, `1alpha2`); maturity transitions also change it (for example, `1beta1` or `1`). This policy is independent of module/action release versions. New tooling must accept supported older plans within the same schema; older tooling is not guaranteed to understand newly introduced features. Plans from development snapshots before this compatibility baseline may require regeneration. Stable identifiers such as `"1"` remain strings too.
 
-The `0.2.0-alpha.4` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
+The `0.2.0` tooling release retains schema `1alpha1`: container support is optional, and older plans without container fields remain accepted.
 
 Preview selection without building, testing or contacting release services:
 
@@ -639,7 +639,7 @@ These messages are enabled by default and use the PowerShell information stream,
 
 Planning evaluates projects with the MSBuild.dll belonging to the SDK already selected by the native host. This avoids CLI-dispatch overhead observed with SDK 11 on persistent runners. The same host, working directory, MSBuild properties and consumer imports are retained; SDK selection and global.json policy are unchanged. Restore, compilation, tests and publishing continue through the normal dotnet CLI.
 
-A runner benchmark returned identical metadata across the CLI and direct entry point, with approximately 9.8ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“10.1 seconds per CLI query versus 0.85ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã¢â‚¬Å“0.95 seconds directly. These measurements describe that runner, not a universal SDK performance guarantee. Cold SDK-profile construction is a separate cost and is still reported by the planning timings.
+A runner benchmark returned identical metadata across the CLI and direct entry point, with approximately 9.8ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ10.1 seconds per CLI query versus 0.85ÃƒÆ’Ã†â€™Ãƒâ€ Ã¢â‚¬â„¢ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â‚¬Å¡Ã‚Â¬Ãƒâ€¦Ã‚Â¡ÃƒÆ’Ã¢â‚¬Å¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã†â€™Ãƒâ€šÃ‚Â¢ÃƒÆ’Ã‚Â¢ÃƒÂ¢Ã¢â€šÂ¬Ã…Â¡Ãƒâ€šÃ‚Â¬ÃƒÆ’Ã¢â‚¬Â¦ÃƒÂ¢Ã¢â€šÂ¬Ã…â€œ0.95 seconds directly. These measurements describe that runner, not a universal SDK performance guarantee. Cold SDK-profile construction is a separate cost and is still reported by the planning timings.
 
 
 ### Workflow artifact retention
@@ -868,7 +868,7 @@ registry during Release. Allow runner disk space and transfer time for the full
 images. Deployment, Windows images, signing and container runtime smoke testing
 are outside this initial feature.
 
-Container-capable reusable workflows require `v0.2.0-alpha.1` or later; use `v0.2.0-alpha.4` for container-only builds, mapped test suites, and Harbor missing-tag compatibility. Actions artifact retention defaults to opt-in and one day, introduced in `v0.2.0-alpha.2`.
+Container-capable reusable workflows require `v0.2.0-alpha.1` or later; use `v0.2.0` for container-only builds, mapped test suites, and Harbor missing-tag compatibility. Actions artifact retention defaults to opt-in and one day, introduced in `v0.2.0-alpha.2`.
 The workflow pins its own stages/setup actions to that version; publish the fixed
 tag after validation before consumers adopt it. No release tag is created by
 these scripts. Existing `v0.1.7` examples above describe the previous feature set.
